@@ -1,3 +1,5 @@
+"""Command-line interface glue for UltraVision (batch vision requests and output writers)."""
+
 import argparse
 from contextlib import nullcontext
 from pathlib import Path
@@ -36,6 +38,15 @@ from .writer import Writer
 from .api import call_chat_completions
 
 def _prepare_batch(files: List[Path], args):
+    """Prepare prompts and metadata for a single batch of images.
+
+    Args:
+        files (List[Path]): Image files that will be sent together in one request.
+        args: Parsed CLI arguments controlling prompts, rotation, and resizing.
+
+    Returns:
+        Tuple[List[dict], List[dict]]: Messages payload plus metadata for each file.
+    """
     data_urls = []
     metas = []
     for p in files:
@@ -51,6 +62,15 @@ def _prepare_batch(files: List[Path], args):
     return messages, metas
 
 def _process_batch(files: List[Path], args):
+    """Deliver a prepared batch to the model endpoint with retries.
+
+    Args:
+        files (List[Path]): Images already grouped for this batch.
+        args: CLI arguments that govern API endpoints, retries, and timeouts.
+
+    Returns:
+        dict: Batch result with ``files``, ``metas``, ``resp``, and ``error``.
+    """
     messages, metas = _prepare_batch(files, args)
     attempt = 0
     while True:
@@ -75,6 +95,14 @@ def _process_batch(files: List[Path], args):
             return {"files": files, "metas": metas, "resp": None, "error": repr(e)}
 
 def main(argv=None):
+    """Parse CLI arguments and orchestrate batch processing workflow.
+
+    Args:
+        argv (Sequence[str] | None): Override for CLI arguments passed from ``sys.argv``.
+
+    Returns:
+        int: Exit code where 0 means success and 2 indicates user-facing errors.
+    """
     ap = argparse.ArgumentParser(
         description="Ultra image processor for LM Studio + Qwen3-VL: fast, parallel, robust."
     )
@@ -141,13 +169,13 @@ def main(argv=None):
 
     # Prepare writer & resume filter
     writer = Writer(Path(args.out), args.format)
-    with writer:
-        done_hashes = set()
-        if args.resume and args.format == "jsonl":
-            done_hashes = writer.already_done_hashes()
-            if done_hashes:
-                info(f"Resume enabled: {len(done_hashes)} already in {args.out}, will skip duplicates.")
+    done_hashes = set()
+    if args.resume and args.format == "jsonl":
+        done_hashes = writer.already_done_hashes()
+        if done_hashes:
+            info(f"Resume enabled: {len(done_hashes)} already in {args.out}, will skip duplicates.")
 
+    with writer:
         # Build batches with dedup by file content
         batches = []
         seen_hashes = set(done_hashes)

@@ -40,6 +40,14 @@ if STATIC_DIR.exists():
 
 @app.get("/", response_class=FileResponse)
 async def index() -> FileResponse:
+    """Return the compiled web client entry point.
+
+    Returns:
+        FileResponse: The UltraVision Studio HTML page.
+
+    Raises:
+        HTTPException: If the compiled frontend assets are missing.
+    """
     if not INDEX_FILE.exists():
         raise HTTPException(status_code=500, detail="Static assets missing; reinstall UltraVision.")
     return FileResponse(INDEX_FILE)
@@ -60,6 +68,29 @@ async def analyze(
     max_tokens: int = Form(1200),
     timeout: int = Form(120),
 ):
+    """Accept uploads, build inference prompts, and forward the request to LM Studio.
+
+    Args:
+        files (List[UploadFile]): Uploaded image blobs (16-file limit).
+        api_base (str): FastAPI form field with the LM Studio base URL.
+        api_key (str): Bearer token for the LM Studio request.
+        model (str): Model identifier (default ``qwen/qwen3-vl-8b``).
+        system_prompt (str): System prompt guiding the assistant tone.
+        prompt (str): User prompt appended to each image batch.
+        temperature (float): Sampling temperature.
+        top_p (float): Top-p sampling parameter.
+        presence_penalty (float): Presence penalty for completions.
+        frequency_penalty (float): Frequency penalty for completions.
+        max_tokens (int): Token budget for completions.
+        timeout (int): HTTP timeout in seconds.
+
+    Returns:
+        dict: Summary, raw response, asset metadata, and request parameters.
+
+    Raises:
+        HTTPException: When no images are uploaded, the batch is too large,
+            or the backend inference call fails.
+    """
     if not files:
         raise HTTPException(status_code=400, detail="Upload at least one image.")
     if len(files) > 16:
@@ -121,7 +152,13 @@ async def analyze(
 
 
 def run(host: str = "0.0.0.0", port: int = 8000, reload: bool = True) -> None:
-    """Launch the UltraVision web server."""
+    """Start the FastAPI server for UltraVision Studio.
+
+    Args:
+        host (str): Host/IP to bind to.
+        port (int): Port number for incoming connections.
+        reload (bool): Whether to enable auto-reload for development.
+    """
     import uvicorn
 
     uvicorn.run("ultravision.web.server:app", host=host, port=port, reload=reload)

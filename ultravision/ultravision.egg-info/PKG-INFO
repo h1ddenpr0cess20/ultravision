@@ -19,82 +19,70 @@ Provides-Extra: dev
 Requires-Dist: pytest>=7.4; extra == "dev"
 Dynamic: license-file
 
-# ultravision
+# UltraVision
 
-Ultra-fast, resilient batch image processor for **LM Studio** using **Qwen/Qwen3-VL** (or any OpenAI-compatible vision model).
+UltraVision is a 👉 fast, resilient batch image processor that pairs LM Studio (or any OpenAI-compatible vision model) with a CLI + web companion. Run it locally to describe folders of images, resume interrupted runs, deduplicate by hash, or spin up a browser-based studio for drag-and-drop uploads.
 
-**Features**
+## Getting started
 
-- Recursive folder scan, glob patterns, `--limit`
-- **Resume** mode (skips already-processed images via SHA-256)
-- **Concurrency** with smart retry/backoff
-- Optional **EXIF autorotate** and **resize** (Pillow)
-- Output to **jsonl / json / text / csv / markdown**
-- Deduplicate by content hash
-- Live spinner and colored logs via **rich**
-- Data URLs with base64 for LM Studio `/v1/chat/completions`
+1. **Install the package**
+   ```bash
+   pip install .
+   ```
+   (Or build a wheel via `python -m build` and `pip install ./dist/ultravision-*.whl`.)
 
-## Install
+2. **Start LM Studio** (default `http://localhost:1234`) with `qwen/qwen3-vl-8b` or another vision-enabled model.
 
-```bash
-pip install .
-# or
-pip install ultravision-0.1.0-py3-none-any.whl  # if you built a wheel
-```
+3. **Run UltraVision**
+   ```bash
+   ultravision ./images --model qwen/qwen3-vl-8b --format jsonl --out results.jsonl
+   ```
 
-## Quick Start
+UltraVision autodetects common image extensions, batches requests, retries failures with backoff, and writes the outputs in the format you choose.
 
-Start LM Studio server at `http://localhost:1234` and load `qwen/qwen3-vl-8b`.
+## Command-line highlights
 
-```bash
-ultravision ./images   --model qwen/qwen3-vl-8b   --format jsonl   --out results.jsonl
-```
+- **Batching & resuming:** `--per-request`, `--limit`, `--recursive`, `--patterns`, and `--concurrency` tune how images are grouped. `--resume` plus `--format jsonl` loads previously written SHA-256 hashes to skip duplicates.
+- **Outputs:** Supported formats are `jsonl`, `json`, `text`, `markdown`, or `csv`; the CLI defaults to `outputs.<format>`.
+- **Prompt control:** Customize `--system-prompt`, `--prompt`, temperature, `--max-tokens`, and inject arbitrary JSON with `--extra` (e.g., `{"top_p":0.9}`).
+- **Image hygiene:** Add `--autorotate` and `--max-side` (Pillow) to normalize EXIF orientation and limit the largest dimension before uploading.
+- **Failure visibility:** Colored logging via `rich` (when available) plus `--fail-log` captures batches that exhaust retries.
 
-Parallel, with autorotate/resize and 2 images per request:
+Example workflows:
 
 ```bash
-ultravision ./images   --per-request 2 --concurrency 4   --autorotate --max-side 1600
+ultravision ./images --per-request 2 --concurrency 4 --autorotate --max-side 1600
+ultravision ./images --resume --format markdown --out summary.md
+ultravision ./images --format csv --out spreadsheet.csv
 ```
 
-Resume & write markdown:
+Run `ultravision --help` to explore every flag documented in `docs/cli.md`.
 
-```bash
-ultravision ./images --resume --format markdown --out run.md
-```
+## Web studio
 
-If you omit `--out`, the tool saves to `outputs.<format>` automatically (for example `outputs.csv`).
-
-CSV for spreadsheets:
-
-```bash
-ultravision ./images --format csv --out out.csv
-```
-
-## CLI
-
-Run `ultravision --help` for full options.
-
-## Web Studio
-
-Launch the browser companion with a single command:
+FastAPI backs the browser UI:
 
 ```bash
 pip install .
 uvicorn ultravision.web.server:app --reload
 ```
 
-Then open [http://localhost:8000](http://localhost:8000) to access UltraVision Studio, drag in imagery, and point the settings panel at your LM Studio (or any OpenAI-compatible) endpoint.
+Open [http://localhost:8000](http://localhost:8000), drag images into the page, and point the settings at your LM Studio endpoint. The server reuses the same helpers as the CLI so metadata, prompts, and output extraction stay consistent.
+
+## Development & docs
+
+- Source layout: CLI (`ultravision/cli.py`), writers, API helpers, `images`, `util`, and the FastAPI server.
+- Docstrings follow the Google style guide; keep docs in sync by updating the relevant `docs/*.md` files (`cli.md`, `overview.md`, `development.md`, etc.).
+- Run `rg` to search across the repo and `pytest` to guard regressions; refer to `docs/development.md` for the project workflow.
 
 ## Testing
-
-Install the development dependencies and run the Pytest suite from the project root:
 
 ```bash
 pip install -e ".[dev]"
 pytest
 ```
 
-The tests cover the image helpers, writer formats/resume behavior, CLI batching/deduplication logic, and utility helpers to guard against regressions.
+The suite covers image helpers, writer formats/resume behavior, CLI batching/dedup logic, and utility helpers like backoff/thread pools.
 
 ## License
 
