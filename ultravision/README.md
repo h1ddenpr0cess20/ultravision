@@ -64,6 +64,17 @@ uvicorn ultravision.web.server:app --reload
 
 Then open [http://localhost:8000](http://localhost:8000) to access UltraVision Studio, drag in imagery, and point the settings panel at your LM Studio (or any OpenAI-compatible) endpoint.
 
+## Testing
+
+Install the development dependencies and run the Pytest suite from the project root:
+
+```bash
+pip install -e ".[dev]"
+pytest
+```
+
+The tests cover the image helpers, writer formats/resume behavior, CLI batching/deduplication logic, and utility helpers to guard against regressions.
+
 ## License
 
 MIT

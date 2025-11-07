@@ -21,6 +21,11 @@ dependencies = [
     "python-multipart>=0.0.7"
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+]
+
 [project.scripts]
 ultravision = "ultravision.cli:main"
 ultravision-web = "ultravision.web.server:run"
