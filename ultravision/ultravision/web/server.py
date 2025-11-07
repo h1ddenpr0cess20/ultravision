@@ -1,0 +1,127 @@
+"""FastAPI server powering the UltraVision web client."""
+
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+from typing import List
+
+from fastapi import FastAPI, Form, HTTPException, UploadFile
+from fastapi.concurrency import run_in_threadpool
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+
+from ..api import call_chat_completions, extract_text
+from ..images import file_meta, guess_mime, make_messages, to_data_url
+
+logger = logging.getLogger(__name__)
+
+STATIC_DIR = Path(__file__).parent / "static"
+INDEX_FILE = STATIC_DIR / "index.html"
+
+app = FastAPI(
+    title="UltraVision Studio",
+    description="Browser companion for UltraVision with drag-and-drop uploads.",
+    version="0.1.0",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
+)
+
+if STATIC_DIR.exists():
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+@app.get("/", response_class=FileResponse)
+async def index() -> FileResponse:
+    if not INDEX_FILE.exists():
+        raise HTTPException(status_code=500, detail="Static assets missing; reinstall UltraVision.")
+    return FileResponse(INDEX_FILE)
+
+
+@app.post("/api/analyze")
+async def analyze(
+    files: List[UploadFile],
+    api_base: str = Form("http://localhost:1234"),
+    api_key: str = Form("lm-studio"),
+    model: str = Form("qwen/qwen3-vl-8b"),
+    system_prompt: str = Form("You are a precise, concise vision assistant."),
+    prompt: str = Form("Describe the scene with crisp, confident detail."),
+    temperature: float = Form(0.2),
+    top_p: float = Form(1.0),
+    presence_penalty: float = Form(0.0),
+    frequency_penalty: float = Form(0.0),
+    max_tokens: int = Form(1200),
+    timeout: int = Form(120),
+):
+    if not files:
+        raise HTTPException(status_code=400, detail="Upload at least one image.")
+    if len(files) > 16:
+        raise HTTPException(status_code=413, detail="Limit 16 images per request.")
+
+    assets = []
+    data_urls = []
+    for upload in files:
+        blob = await upload.read()
+        if not blob:
+            continue
+        name = upload.filename or "upload"
+        assets.append({"name": name, "meta": file_meta(name, blob)})
+        data_urls.append(to_data_url(guess_mime(name), blob))
+
+    if not data_urls:
+        raise HTTPException(status_code=400, detail="No readable image data found.")
+
+    messages = make_messages(system_prompt, prompt, data_urls)
+    generation_params = {
+        "top_p": float(top_p),
+        "presence_penalty": float(presence_penalty),
+        "frequency_penalty": float(frequency_penalty),
+    }
+
+    try:
+        response = await run_in_threadpool(
+            call_chat_completions,
+            api_base,
+            api_key,
+            model,
+            messages,
+            float(temperature),
+            int(max_tokens),
+            int(timeout),
+            generation_params,
+        )
+    except Exception as exc:  # pragma: no cover - network errors
+        logger.exception("UltraVision inference failed")
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    summary = extract_text(response).strip()
+    return {
+        "summary": summary,
+        "raw": response,
+        "assets": assets,
+        "messages": messages,
+        "request": {
+            "api_base": api_base,
+            "model": model,
+            "temperature": float(temperature),
+            "top_p": float(top_p),
+            "presence_penalty": float(presence_penalty),
+            "frequency_penalty": float(frequency_penalty),
+            "max_tokens": int(max_tokens),
+            "timeout": int(timeout),
+        },
+    }
+
+
+def run(host: str = "0.0.0.0", port: int = 8000, reload: bool = True) -> None:
+    """Launch the UltraVision web server."""
+    import uvicorn
+
+    uvicorn.run("ultravision.web.server:app", host=host, port=port, reload=reload)

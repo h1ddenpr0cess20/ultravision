@@ -1,3 +1,22 @@
+Metadata-Version: 2.4
+Name: ultravision
+Version: 0.1.0
+Summary: Ultra-fast LM Studio + Qwen3-VL batch image processor with concurrency, resume, and rich outputs.
+Author-email: Your Name <you@example.com>
+License: MIT
+Keywords: LM Studio,Qwen,Vision,Batch,OpenAI-compatible,CLI
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: requests>=2.31.0
+Requires-Dist: tqdm>=4.66.0
+Requires-Dist: rich>=13.7.0
+Requires-Dist: Pillow>=10.0.0
+Requires-Dist: fastapi>=0.115.0
+Requires-Dist: uvicorn[standard]>=0.23.0
+Requires-Dist: python-multipart>=0.0.7
+Dynamic: license-file
+
 # ultravision
 
 Ultra-fast, resilient batch image processor for **LM Studio** using **Qwen/Qwen3-VL** (or any OpenAI-compatible vision model).

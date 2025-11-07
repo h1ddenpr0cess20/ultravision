@@ -2,7 +2,7 @@ import base64
 import hashlib
 import mimetypes
 from pathlib import Path
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union
 
 try:
     from PIL import Image, ImageOps
@@ -10,7 +10,10 @@ try:
 except Exception:
     _PIL_OK = False
 
-def guess_mime(path: Path) -> str:
+PathLike = Union[str, Path]
+
+
+def guess_mime(path: PathLike) -> str:
     mime, _ = mimetypes.guess_type(str(path))
     return mime or "application/octet-stream"
 
@@ -50,7 +53,7 @@ def to_data_url(mime: str, data: bytes) -> str:
     b64 = base64.b64encode(data).decode("ascii")
     return f"data:{mime};base64,{b64}"
 
-def file_meta(path: Path, data: bytes) -> Dict[str, Any]:
+def file_meta(path: PathLike, data: bytes) -> Dict[str, Any]:
     meta: Dict[str, Any] = {
         "file": str(path),
         "size_bytes": len(data),

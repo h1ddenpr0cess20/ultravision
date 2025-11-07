@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>UltraVision Studio</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta
+      name="description"
+      content="UltraVision Studio helps you analyze images with LM Studio and Qwen."
+    >
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='28' fill='%237c5cff'/%3E%3Cpath d='M32 18l12 14-12 14-12-14z' fill='%23fff'/%3E%3C/svg%3E"
+    >
+    <link rel="stylesheet" href="/static/css/styles.css">
+  </head>
+  <body>
+    <div class="bg-waves" aria-hidden="true"></div>
+    <main class="page">
+      <header class="hero">
+        <div class="hero__badge">Image Analysis</div>
+        <h1>UltraVision Studio</h1>
+        <p class="hero__tagline">
+          Analyze images with LM Studio and Qwen to produce structured summaries.
+        </p>
+      </header>
+
+      <section class="workspace">
+        <div class="panel panel--input">
+          <div class="panel__header">
+            <h2>Upload and Analyze Images</h2>
+            <p>
+              Upload up to sixteen images, adjust the settings, and generate a model summary from the
+              results.
+            </p>
+          </div>
+
+          <form id="analyze-form" novalidate>
+            <div class="composer">
+              <div class="dropzone" id="dropzone" aria-label="Drop images here">
+                <svg class="dropzone__icon" viewBox="0 0 64 64" role="presentation">
+                  <defs>
+                    <linearGradient id="glow" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stop-color="#9c68ff"/>
+                      <stop offset="100%" stop-color="#64d7ff"/>
+                    </linearGradient>
+                  </defs>
+                  <path
+                    d="M24 40h16a4 4 0 004-4v-6h6a4 4 0 004-4V20a4 4 0 00-4-4h-6v-6a4 4 0 00-4-4H24a4 4 0 00-4 4v6h-6a4 4 0 00-4 4v6a4 4 0 004 4h6v6a4 4 0 004 4z"
+                    fill="url(#glow)"
+                  />
+                  <path
+                    d="M24 28v8h16v-8h8v-8h-8v-8H24v8h-8v8z"
+                    fill="#070b29"
+                  />
+                </svg>
+                <div class="dropzone__title">Upload images</div>
+                <p class="dropzone__subtitle">
+                  Drag files here or browse to add PNG, JPG, WebP, GIF, or TIFF images.
+                </p>
+              <input type="file" id="file-input" accept="image/*" multiple hidden>
+              <ul class="dropzone__list" id="file-list"></ul>
+            </div>
+
+              <aside class="settings">
+                <div class="settings__group">
+                  <label class="label" for="api-base">API Base</label>
+                  <input
+                    id="api-base"
+                    name="api_base"
+                    class="input"
+                    type="url"
+                    value="http://localhost:1234"
+                    required
+                  >
+                </div>
+
+                <div class="settings__group">
+                  <label class="label" for="model">Model</label>
+                  <select id="model" name="model" class="input input--select" required>
+                    <option value="qwen/qwen3-vl-8b" selected>qwen/qwen3-vl-8b</option>
+                    <option value="qwen/qwen3-vl-30b">qwen/qwen3-vl-30b</option>
+                  </select>
+                </div>
+
+                <div class="settings__group">
+                  <label class="label" for="system-prompt">System Prompt</label>
+                  <textarea
+                    id="system-prompt"
+                    name="system_prompt"
+                    class="input input--textarea"
+                    rows="3"
+                  >You are a precise, concise vision assistant.</textarea>
+                </div>
+
+                <div class="settings__group">
+                  <label class="label" for="prompt">User Prompt</label>
+                  <textarea
+                    id="prompt"
+                    name="prompt"
+                    class="input input--textarea"
+                    rows="3"
+                  >Describe the image with crisp, confident detail.</textarea>
+                </div>
+
+                <div class="settings__divider" role="presentation"></div>
+
+                <div class="settings__group settings__group--range">
+                  <div class="label-row">
+                    <span class="label-text">Temperature</span>
+                    <span class="label__value" data-display-target="temperature">0.20</span>
+                  </div>
+                  <input
+                    id="temperature"
+                    name="temperature"
+                    class="input input--range"
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.05"
+                    value="0.2"
+                    data-display="temperature"
+                  >
+                </div>
+
+                <div class="settings__group settings__group--range">
+                  <div class="label-row">
+                    <span class="label-text">Top-p</span>
+                    <span class="label__value" data-display-target="top_p">1.00</span>
+                  </div>
+                  <input
+                    id="top-p"
+                    name="top_p"
+                    class="input input--range"
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.05"
+                    value="1"
+                    data-display="top_p"
+                  >
+                </div>
+
+                <div class="settings__group settings__group--range">
+                  <div class="label-row">
+                    <span class="label-text">Presence Penalty</span>
+                    <span class="label__value" data-display-target="presence_penalty">0.00</span>
+                  </div>
+                  <input
+                    id="presence-penalty"
+                    name="presence_penalty"
+                    class="input input--range"
+                    type="range"
+                    min="-2"
+                    max="2"
+                    step="0.1"
+                    value="0"
+                    data-display="presence_penalty"
+                  >
+                </div>
+
+                <div class="settings__group settings__group--range">
+                  <div class="label-row">
+                    <span class="label-text">Frequency Penalty</span>
+                    <span class="label__value" data-display-target="frequency_penalty">0.00</span>
+                  </div>
+                  <input
+                    id="frequency-penalty"
+                    name="frequency_penalty"
+                    class="input input--range"
+                    type="range"
+                    min="-2"
+                    max="2"
+                    step="0.1"
+                    value="0"
+                    data-display="frequency_penalty"
+                  >
+                </div>
+
+                <div class="settings__group settings__group--range">
+                  <div class="label-row">
+                    <span class="label-text">Max Tokens</span>
+                    <span class="label__value" data-display-target="max_tokens">1200 tokens</span>
+                  </div>
+                  <input
+                    id="max-tokens"
+                    name="max_tokens"
+                    class="input input--range"
+                    type="range"
+                    min="256"
+                    max="4096"
+                    step="64"
+                    value="1200"
+                    data-display="max_tokens"
+                  >
+                </div>
+
+                <div class="settings__group">
+                  <label class="label" for="timeout">Timeout (s)</label>
+                  <input
+                    id="timeout"
+                    name="timeout"
+                    class="input"
+                    type="number"
+                    min="10"
+                    max="300"
+                    value="120"
+                  >
+                </div>
+
+              </aside>
+            </div>
+            <div class="form-actions">
+              <div class="dropzone__actions">
+                <button type="button" class="btn btn--ghost" id="browse-btn">Browse</button>
+                <button type="button" class="btn btn--ghost" id="clear-btn">Clear</button>
+              </div>
+              <button type="submit" class="btn btn--primary" id="analyze-btn">
+                <span class="btn__label-default">Run Analysis</span>
+                <span class="btn__label-busy">
+                  <svg viewBox="0 0 32 32" class="spinner" role="presentation">
+                    <circle cx="16" cy="16" r="12"/>
+                  </svg>
+                  Processing
+                </span>
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <div class="panel panel--output">
+          <div class="panel__header">
+            <h2>Analysis Results</h2>
+            <p id="status-line">Add images to get started.</p>
+          </div>
+          <div class="results" id="results"></div>
+          <div class="download-bar">
+            <label for="download-format" class="label-text">Download as</label>
+            <div class="download-bar__controls">
+              <select id="download-format" class="input input--select">
+                <option value="markdown">Markdown (.md)</option>
+                <option value="text">Plain Text (.txt)</option>
+                <option value="json">JSON (.json)</option>
+                <option value="jsonl">JSON Lines (.jsonl)</option>
+                <option value="csv">CSV (.csv)</option>
+              </select>
+              <button type="button" class="btn btn--ghost" id="download-btn" disabled>Download</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <script type="module" src="/static/js/app.js"></script>
+  </body>
+</html>
