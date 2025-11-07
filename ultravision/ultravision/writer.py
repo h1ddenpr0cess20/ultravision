@@ -1,3 +1,5 @@
+"""Writers for persisting UltraVision responses into multiple formats."""
+
 import json
 import csv
 from pathlib import Path
@@ -6,6 +8,11 @@ from typing import List, Dict, Any
 from .api import extract_text
 
 class Writer:
+    """Context-managed writer for serializing UltraVision batches.
+
+    Handles JSONL, JSON, plain text, markdown, and CSV output formats by translating
+    the same response payload into the desired layout.
+    """
     def __init__(self, path: Path, fmt: str):
         self.path = path
         self.fmt = fmt
@@ -14,6 +21,11 @@ class Writer:
         self._csv = None
 
     def __enter__(self):
+        """Prepare the output file and return the writer.
+
+        Returns:
+            Writer: Self, ready to write records.
+        """
         self.path.parent.mkdir(parents=True, exist_ok=True)
         if self.fmt in ("jsonl", "text", "markdown", "csv"):
             self._fp = self.path.open("w", encoding="utf-8", newline="")
@@ -23,6 +35,13 @@ class Writer:
         return self
 
     def write_record(self, files: List[Path], metas: List[Dict[str, Any]], resp: Dict[str, Any]):
+        """Persist a single batch's metadata and generated text according to the chosen format.
+
+        Args:
+            files (List[Path]): Files that were batched together.
+            metas (List[Dict[str, Any]]): Per-file metadata including sha256/mime.
+            resp (Dict[str, Any]): Raw LM Studio response to serialize.
+        """
         text = extract_text(resp)
         record = {"files": [str(f) for f in files], "text": text, "raw": resp, "meta": metas}
         if self.fmt == "jsonl":
@@ -48,6 +67,7 @@ class Writer:
             self._accum.append(record)
 
     def already_done_hashes(self) -> set:
+        """Read an existing jsonl output to avoid reprocessing duplicate images."""
         if not self.path.exists() or self.fmt != "jsonl":
             return set()
         done = set()
@@ -67,6 +87,13 @@ class Writer:
         return done
 
     def __exit__(self, exc_type, exc, tb):
+        """Finalize any buffered output and close resources.
+
+        Args:
+            exc_type: Exception type if the context exited with an error.
+            exc: Exception instance, if any.
+            tb: Traceback object if an exception occurred.
+        """
         if self.fmt == "json":
             with self.path.open("w", encoding="utf-8") as f:
                 json.dump(self._accum, f, ensure_ascii=False, indent=2)
