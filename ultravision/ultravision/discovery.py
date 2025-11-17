@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import os
 import re
 from typing import Dict, List, Optional, Set, Tuple
 
@@ -11,6 +12,9 @@ import aiohttp
 import netifaces
 
 DEFAULT_VISION_MODEL_HINTS = ("gemma3",)
+DOCKER_HOST_ALIASES = ("host.docker.internal",)
+DOCKER_CONTAINER_MARKERS = ("docker", "kubepods", "containerd")
+MAX_NETWORK_SCAN_HOSTS = 512
 
 
 class VisionModelDiscovery:
@@ -31,6 +35,7 @@ class VisionModelDiscovery:
             re.compile(r"qwen\d+(\.\d+)?-?vl", re.IGNORECASE),
             re.compile(r"qwen/qwen\d+(\.\d+)?-?vl", re.IGNORECASE),
         ]
+        self._running_in_container = self._detect_container_environment()
 
     def _get_local_addresses(self) -> Set[str]:
         """Return localhost aliases and interface IPs."""
@@ -45,11 +50,30 @@ class VisionModelDiscovery:
                         local_ips.add(ip)
         return local_ips
 
+    def _get_default_gateways(self) -> Set[str]:
+        """Return IPv4 gateway addresses (often the Docker host from containers)."""
+
+        gateways: Set[str] = set()
+        try:
+            gateway_info = netifaces.gateways()
+        except Exception:
+            return gateways
+
+        default_entries = gateway_info.get("default", {})
+        ipv4_default = default_entries.get(netifaces.AF_INET)
+        if ipv4_default:
+            gateway = ipv4_default[0] if isinstance(ipv4_default, (list, tuple)) else ipv4_default
+            if gateway:
+                gateways.add(str(gateway))
+
+        return gateways
+
     def _get_network_hosts(self) -> Set[str]:
         """Enumerate all potential LAN hosts excluding the known interface IPs."""
 
         local_ips = self._get_local_addresses()
         potential_hosts: Set[str] = set()
+        gateway_hosts = self._get_default_gateways()
         for interface in netifaces.interfaces():
             addrs = netifaces.ifaddresses(interface)
             if netifaces.AF_INET not in addrs:
@@ -61,12 +85,24 @@ class VisionModelDiscovery:
                     continue
                 try:
                     network = ipaddress.IPv4Network(f"{ip}/{netmask}", strict=False)
-                    for host in network.hosts():
-                        host_str = str(host)
-                        if host_str not in local_ips:
-                            potential_hosts.add(host_str)
                 except Exception:
                     continue
+                host_limit = (
+                    MAX_NETWORK_SCAN_HOSTS if network.num_addresses > MAX_NETWORK_SCAN_HOSTS + 2 else None
+                )
+                count = 0
+                try:
+                    for host in network.hosts():
+                        host_str = str(host)
+                        if host_str in local_ips:
+                            continue
+                        potential_hosts.add(host_str)
+                        count += 1
+                        if host_limit is not None and count >= host_limit:
+                            break
+                except Exception:
+                    continue
+        potential_hosts.update(gateway_hosts - local_ips)
         return potential_hosts
 
     def _is_vision_model(self, model_name: str) -> bool:
@@ -145,7 +181,55 @@ class VisionModelDiscovery:
                     "vision_models": models,
                 }
 
+        if not results["lm_studio"]:
+            alias_entry = await self._discover_host_alias(
+                session, "lm_studio", self.lm_studio_port
+            )
+            if alias_entry:
+                results["lm_studio"] = alias_entry
+
+        if not results["ollama"]:
+            alias_entry = await self._discover_host_alias(
+                session, "ollama", self.ollama_port
+            )
+            if alias_entry:
+                results["ollama"] = alias_entry
+
         return results
+
+    def _detect_container_environment(self) -> bool:
+        """Detect whether the discovery helper is running inside a container."""
+
+        forced = os.environ.get("ULTRAVISION_INSIDE_DOCKER")
+        if forced:
+            return forced.strip().lower() in {"1", "true", "yes"}
+        if os.path.exists("/.dockerenv"):
+            return True
+        try:
+            with open("/proc/1/cgroup", "rt", encoding="utf-8") as handle:
+                contents = handle.read()
+        except OSError:
+            return False
+        return any(marker in contents for marker in DOCKER_CONTAINER_MARKERS)
+
+    async def _discover_host_alias(
+        self, session: aiohttp.ClientSession, service_type: str, port: int
+    ) -> Optional[Dict]:
+        """Check well-known Docker host aliases when localhost lookup fails."""
+
+        if port <= 0:
+            return None
+        if not self._running_in_container:
+            return None
+        for alias in DOCKER_HOST_ALIASES:
+            if not await self._check_port(alias, port):
+                continue
+            _, info = await self._fetch_server_info(
+                session, service_type, f"http://{alias}:{port}"
+            )
+            if info:
+                return info
+        return None
 
     async def _check_port_and_service(
         self, host: str, service_type: str, port: int
