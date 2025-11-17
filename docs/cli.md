@@ -23,8 +23,8 @@ Every run:
 
 | Flag | Description |
 | --- | --- |
-| `--model` | LM Studio-compatible model ID (default `qwen/qwen3-vl-8b`). |
-| `--api-base` | Base URL for your LM Studio instance (e.g., `http://localhost:1234`). |
+| `--model` | LM Studio/Ollama model ID (default `qwen/qwen3-vl-8b`). |
+| `--api-base` | Base URL for your LM Studio or Ollama instance (LM Studio default `http://localhost:1234`, Ollama default `http://localhost:11434`). |
 | `--api-key` | Bearer token header (LM Studio ignores the actual value). |
 | `--auto-discover` | Scan for LM Studio/Ollama hosts and auto-select the first vision-ready model. |
 | `--prefer-service` | When auto-discovering, prefer `lm_studio` (default) or `ollama`. |
@@ -46,6 +46,14 @@ Every run:
 ### Auto-discovery
 
 Pass `--auto-discover` when you don’t want to type `--api-base`/`--model`. UltraVision will instantiate the bundled `VisionModelDiscovery`, scan localhost plus LAN ranges for LM Studio/Ollama servers, and pick the first vision-capable model. Use `--prefer-service ollama` if you’d like Ollama options ranked first, override the probe ports with `--lm-studio-port` / `--ollama-port`, and add extra model substrings (e.g., `gemma3`) via `--discovery-models`. If no servers are reachable the CLI exits early so you can provide manual values instead.
+
+### Running directly against Ollama
+
+- Ensure `ollama serve` is running and that you’ve pulled a multimodal model (e.g., `ollama pull llava:13b` or another `*vl` build).
+- Point UltraVision at the Ollama endpoint with `--api-base http://localhost:11434` (or the host/port where Ollama listens).
+- Pass the Ollama model name via `--model` (e.g., `--model llava:13b`).
+- Auto-discovery already scans the Ollama port; add `--prefer-service ollama` to bias selection toward Ollama hosts when both LM Studio and Ollama are available.
+- When running inside Docker, forward the Ollama port or add `--add-host host.docker.internal:host-gateway` and set `--api-base http://host.docker.internal:11434`.
 
 ### Resume and deduplication
 

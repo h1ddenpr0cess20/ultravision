@@ -4,7 +4,7 @@ The FastAPI-based web companion mirrors the CLI experience with a browsable drag
 
 ## Running the server
 
-Ensure you have FastAPI/uvicorn installed and your LM Studio server running:
+Ensure you have FastAPI/uvicorn installed and either your LM Studio (default `1234`) or Ollama (`11434`) server running:
 
 ```bash
 pip install .
@@ -12,6 +12,12 @@ uvicorn ultravision.web.server:app --reload
 ```
 
 Then point your browser to [http://localhost:8000](http://localhost:8000). The static assets (React-like single-page app shipped under `ultravision/web/static`) handle the UI.
+
+### Connecting to LM Studio or Ollama
+
+- **LM Studio:** Leave the defaults alone (`http://localhost:1234` + `qwen/qwen3-vl-8b`) or pick another model ID exposed by LM Studio.
+- **Ollama:** Start `ollama serve`, pull a multimodal model (`ollama pull llava:13b`), and either let discovery pick it up or set the server dropdown to **Custom** with `http://localhost:11434` and the Ollama model tag.
+- The Refresh button re-runs discovery so any newly-started LM Studio or Ollama hosts become selectable without reloading the page.
 
 ## Endpoints
 
@@ -47,7 +53,7 @@ Returns the discovery payload that the CLI and Studio UI share when locating LM 
   2. Reports each service (`lm_studio`, `ollama`) with a `server_address`, optional `local_addresses`, and the discovered `vision_models`.
   3. Honors the `timeout` query parameter (default `2.0` seconds) and raises `HTTP 502` if an unexpected error occurs while probing.
 
-The UltraVision Studio frontend calls this endpoint on load (and whenever you hit Refresh) so the **Server** and **Model** dropdowns are pre-filled with reachable vision targets; switch either field to **Custom** when you want to override the discovered values.
+The UltraVision Studio frontend calls this endpoint on load (and whenever you hit Refresh) so the **Server** and **Model** dropdowns are pre-filled with reachable vision targets from both LM Studio and Ollama; switch either field to **Custom** when you want to override the discovered values.
 
 ## Deployment notes
 
