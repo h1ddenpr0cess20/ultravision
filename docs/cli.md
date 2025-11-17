@@ -26,6 +26,10 @@ Every run:
 | `--model` | LM Studio-compatible model ID (default `qwen/qwen3-vl-8b`). |
 | `--api-base` | Base URL for your LM Studio instance (e.g., `http://localhost:1234`). |
 | `--api-key` | Bearer token header (LM Studio ignores the actual value). |
+| `--auto-discover` | Scan for LM Studio/Ollama hosts and auto-select the first vision-ready model. |
+| `--prefer-service` | When auto-discovering, prefer `lm_studio` (default) or `ollama`. |
+| `--lm-studio-port` / `--ollama-port` | Ports probed during auto-discovery (defaults 1234 / 11434). |
+| `--discovery-timeout` / `--discovery-models` | Tune the HTTP timeout and add extra model substrings to treat as “vision”. |
 | `--prompt` / `--system-prompt` | Customize the user/system messages sent before images. |
 | `--per-request` | Number of images per inference call; helps balance latency and JSON payload size. |
 | `--recursive` / `--patterns` | Traverse subdirectories and match custom glob patterns. |
@@ -38,6 +42,10 @@ Every run:
 | `--autorotate` / `--max-side` | Pillow-powered EXIF autorotation and resizing. |
 | `--max-tokens`, `--temperature`, `--timeout`, `--retries` | Control LM Studio generation and retry behavior. |
 | `--extra` | JSON dictionary merged into the chat completions payload (e.g., `{"top_p":0.9}`). |
+
+### Auto-discovery
+
+Pass `--auto-discover` when you don’t want to type `--api-base`/`--model`. UltraVision will instantiate the bundled `VisionModelDiscovery`, scan localhost plus LAN ranges for LM Studio/Ollama servers, and pick the first vision-capable model. Use `--prefer-service ollama` if you’d like Ollama options ranked first, override the probe ports with `--lm-studio-port` / `--ollama-port`, and add extra model substrings (e.g., `gemma3`) via `--discovery-models`. If no servers are reachable the CLI exits early so you can provide manual values instead.
 
 ### Resume and deduplication
 

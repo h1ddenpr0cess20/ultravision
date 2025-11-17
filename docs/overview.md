@@ -7,17 +7,19 @@ UltraVision is a fast, resilient batch image processor that pairs with LM Studio
 - **Batch processing:** recursive scans, glob filters, per-request batching, resume/dedup, smart retries, and concurrency controls.
 - **Multi-format outputs:** JSONL, JSON, plain text, Markdown, and CSV writers share a common extraction pipeline.
 - **Image hygiene:** optional EXIF autorotate, resizing, and mime/hash metadata for reliable deduplication.
+- **Auto-discovery:** probes localhost and LAN hosts for LM Studio/Ollama vision servers so the CLI and web UI can auto-fill `api_base`/`model` values and reuse a shared set of vision model hints.
 - **Web companion:** a FastAPI-backed web interface that mirrors CLI settings and provides a rich drag-and-drop experience.
 - **Extensible helpers:** shared utilities for API calls, data transformation, and concurrency allow consistent behavior across binaries and UIs.
 
 ## Architecture
 
 1. **CLI runner (`ultravision.cli`):** Orchestrates argument parsing, file discovery, batching, retries, writer management, and logging with optional `rich` integration.
-2. **Image helpers (`ultravision.images`):** Guess MIME types, read bytes, handle optional Pillow-based rotations/resizes, create metadata, and build LM Studio chat messages.
-3. **Client writers (`ultravision.writer`):** Serialize outputs into the requested format and support resume awareness through JSONL introspection.
-4. **API helpers (`ultravision.api`):** Send chat completions to LM Studio/OpenAI endpoints and normalize response text.
-5. **Utilities (`ultravision.util`):** Backoff sleep and optional thread pool orchestration keep batches reliable and concurrent.
-6. **Web server (`ultravision.web.server`):** FastAPI backend that accepts uploads, reuses helper modules, and proxies inference results to the browser.
+2. **Discovery (`ultravision.discovery`):** `VisionModelDiscovery` scans localhost, Docker gateways, and LAN ranges for LM Studio/Ollama `/v1/models`, filters for vision-compatible IDs, and surfaces local URLs for both CLI and web auto-configuration.
+3. **Image helpers (`ultravision.images`):** Guess MIME types, read bytes, handle optional Pillow-based rotations/resizes, create metadata, and build LM Studio chat messages.
+4. **Client writers (`ultravision.writer`):** Serialize outputs into the requested format and support resume awareness through JSONL introspection.
+5. **API helpers (`ultravision.api`):** Send chat completions to LM Studio/OpenAI endpoints and normalize response text.
+6. **Utilities (`ultravision.util`):** Backoff sleep and optional thread pool orchestration keep batches reliable and concurrent.
+7. **Web server (`ultravision.web.server`):** FastAPI backend that accepts uploads, reuses helper modules, and proxies inference results to the browser.
 
 ## Dependencies and Environment
 

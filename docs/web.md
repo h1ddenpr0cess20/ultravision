@@ -39,6 +39,16 @@ Accepts multipart uploads and proxies them through LM Studio.
   - `HTTP 413` when chunking more than 16 images.
   - `HTTP 502` when the backend inference throws an exception.
 
+### `GET /api/discover`
+Returns the discovery payload that the CLI and Studio UI share when locating LM Studio/Ollama vision servers.
+
+- **Behavior:**
+  1. Runs `VisionModelDiscovery`, which probes the default hosts (local loopback, Docker gateways, and LAN ranges) on the LM Studio and Ollama ports, fetches `/v1/models`, and filters for vision-capable IDs (e.g., `qwen*vl` plus any hints such as `gemma3`).
+  2. Reports each service (`lm_studio`, `ollama`) with a `server_address`, optional `local_addresses`, and the discovered `vision_models`.
+  3. Honors the `timeout` query parameter (default `2.0` seconds) and raises `HTTP 502` if an unexpected error occurs while probing.
+
+The UltraVision Studio frontend calls this endpoint on load (and whenever you hit Refresh) so the **Server** and **Model** dropdowns are pre-filled with reachable vision targets; switch either field to **Custom** when you want to override the discovered values.
+
 ## Deployment notes
 
 - The server adds CORS middleware that allows all origins for convenience; tighten it if embedding UltraVision in trusted environments.

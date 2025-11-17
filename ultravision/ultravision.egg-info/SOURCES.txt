@@ -1,10 +1,10 @@
 LICENSE
-README.md
 pyproject.toml
 ultravision/__init__.py
 ultravision/__main__.py
 ultravision/api.py
 ultravision/cli.py
+ultravision/discovery.py
 ultravision/images.py
 ultravision/util.py
 ultravision/writer.py

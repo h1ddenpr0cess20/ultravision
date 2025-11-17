@@ -13,6 +13,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from ..api import call_chat_completions, extract_text
+from ..discovery import VisionModelDiscovery, DEFAULT_VISION_MODEL_HINTS
 from ..images import file_meta, guess_mime, make_messages, to_data_url
 
 logger = logging.getLogger(__name__)
@@ -149,6 +150,21 @@ async def analyze(
             "timeout": int(timeout),
         },
     }
+
+
+@app.get("/api/discover")
+async def discover_servers(timeout: float = 2.0):
+    """Return discovered LM Studio/Ollama servers and their vision models."""
+
+    discovery = VisionModelDiscovery(
+        timeout=float(timeout),
+        additional_vision_models=list(DEFAULT_VISION_MODEL_HINTS),
+    )
+    try:
+        return await discovery.discover()
+    except Exception as exc:  # pragma: no cover - network failures
+        logger.exception("Vision server discovery failed")
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 def run(host: str = "0.0.0.0", port: int = 8000, reload: bool = True) -> None:
