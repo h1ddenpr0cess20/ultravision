@@ -1,4 +1,12 @@
 const MAX_FILES = 16;
+const CUSTOM_VALUE = "__custom__";
+const DEFAULT_MODEL_OPTIONS = ["qwen/qwen3-vl-8b", "qwen/qwen3-vl-30b"];
+const DEFAULT_SERVER = {
+  value: "http://localhost:1234",
+  label: "LM Studio · localhost:1234",
+  service: "lm_studio",
+  models: [...DEFAULT_MODEL_OPTIONS],
+};
 
 const state = {
   files: [],
@@ -6,6 +14,11 @@ const state = {
   busy: false,
   toastTimer: null,
   lastResult: null,
+  discovery: {
+    servers: new Map(),
+    raw: null,
+    status: "idle",
+  },
 };
 
 const $ = (id) => document.getElementById(id);
@@ -15,6 +28,13 @@ const fileInput = $("file-input");
 const fileList = $("file-list");
 const browseBtn = $("browse-btn");
 const clearBtn = $("clear-btn");
+const serverSelect = $("server-select");
+const refreshDiscoveryBtn = $("refresh-discovery");
+const apiBaseField = $("api-base");
+const apiBaseCustom = $("api-base-custom");
+const modelSelect = $("model-select");
+const modelField = $("model");
+const modelCustom = $("model-custom");
 const form = $("analyze-form");
 const analyzeBtn = $("analyze-btn");
 const statusLine = $("status-line");
@@ -22,6 +42,10 @@ const resultsGrid = $("results");
 const toast = $("toast");
 const downloadFormat = $("download-format");
 const downloadBtn = $("download-btn");
+const lightbox = $("image-lightbox");
+const lightboxImage = $("lightbox-image");
+const lightboxCaption = $("lightbox-caption");
+const lightboxClose = $("lightbox-close");
 
 const sliderDisplays = {};
 document.querySelectorAll("[data-display-target]").forEach((el) => {
@@ -48,6 +72,256 @@ document.querySelectorAll('input[type="range"][data-display]').forEach((input) =
   input.addEventListener("input", update);
   update();
 });
+
+function serviceLabel(service) {
+  return service === "ollama" ? "Ollama" : "LM Studio";
+}
+
+function trimAddress(address) {
+  return (address || "").replace(/^https?:\/\//i, "");
+}
+
+function initializeServerControls() {
+  if (serverSelect) {
+    serverSelect.innerHTML = "";
+    const loadingOption = document.createElement("option");
+    loadingOption.value = "";
+    loadingOption.textContent = "Searching for servers...";
+    loadingOption.disabled = true;
+    loadingOption.selected = true;
+    serverSelect.appendChild(loadingOption);
+    serverSelect.disabled = true;
+  }
+  if (modelSelect) {
+    modelSelect.innerHTML = "";
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = "Select a server to load models";
+    placeholder.disabled = true;
+    placeholder.selected = true;
+    modelSelect.appendChild(placeholder);
+    modelSelect.disabled = true;
+  }
+}
+
+function buildServerEntries(results) {
+  if (!results) return [];
+  const entries = [];
+  ["lm_studio", "ollama"].forEach((service) => {
+    (results[service] || []).forEach((server) => {
+      const addresses = new Set([server.server_address, ...(server.local_addresses || [])].filter(Boolean));
+      const models = Array.from(new Set(server.vision_models || []));
+      addresses.forEach((address) => {
+        entries.push({
+          value: address,
+          label: `${serviceLabel(service)} · ${trimAddress(address)}`,
+          service,
+          models: models.length ? models : DEFAULT_MODEL_OPTIONS,
+        });
+      });
+    });
+  });
+  return entries;
+}
+
+function setServerOptions(entries, { allowDefaultFallback = false } = {}) {
+  if (!serverSelect || !apiBaseField) return;
+  const map = new Map();
+  const wasCustom = serverSelect.value === CUSTOM_VALUE || (apiBaseCustom && !apiBaseCustom.hidden);
+  const manualValue = wasCustom ? (apiBaseCustom?.value || apiBaseField.value) : "";
+  entries.forEach((entry) => {
+    if (!entry || !entry.value) return;
+    const existing = map.get(entry.value);
+    if (!existing || (!existing.models?.length && entry.models?.length)) {
+      map.set(entry.value, entry);
+    }
+  });
+  if (!map.size && allowDefaultFallback) {
+    map.set(DEFAULT_SERVER.value, DEFAULT_SERVER);
+  }
+  state.discovery.servers = map;
+  serverSelect.innerHTML = "";
+  serverSelect.disabled = false;
+  if (!map.size) {
+    const customOption = document.createElement("option");
+    customOption.value = CUSTOM_VALUE;
+    customOption.textContent = "Custom server...";
+    serverSelect.appendChild(customOption);
+    serverSelect.value = CUSTOM_VALUE;
+    if (apiBaseCustom) {
+      apiBaseCustom.hidden = false;
+      apiBaseCustom.required = true;
+      apiBaseCustom.value = manualValue || "";
+    }
+    apiBaseField.value = (manualValue || "").trim();
+    handleServerSelection(true);
+    return;
+  }
+  [...map.values()].forEach((entry) => {
+    const option = document.createElement("option");
+    option.value = entry.value;
+    option.textContent = entry.label;
+    option.dataset.service = entry.service || "manual";
+    serverSelect.appendChild(option);
+  });
+  const customOption = document.createElement("option");
+  customOption.value = CUSTOM_VALUE;
+  customOption.textContent = "Custom server...";
+  serverSelect.appendChild(customOption);
+  if (wasCustom) {
+    serverSelect.value = CUSTOM_VALUE;
+    if (apiBaseCustom) {
+      apiBaseCustom.hidden = false;
+      apiBaseCustom.required = true;
+      apiBaseCustom.value = manualValue || "";
+    }
+    apiBaseField.value = (manualValue || "").trim();
+    handleServerSelection(true);
+    return;
+  }
+  const previous = apiBaseField.value;
+  const hasPrevious = previous && map.has(previous);
+  const firstEntry = map.values().next().value;
+  const fallback = firstEntry ? firstEntry.value : DEFAULT_SERVER.value;
+  serverSelect.value = hasPrevious ? previous : fallback;
+  handleServerSelection(true);
+}
+
+function handleServerSelection(programmatic = false) {
+  if (!serverSelect || !apiBaseField) return;
+  const value = serverSelect.value;
+  const useCustom = value === CUSTOM_VALUE;
+  const manualModelValue = (modelCustom && modelCustom.value) || modelField.value;
+  if (apiBaseCustom) {
+    apiBaseCustom.hidden = !useCustom;
+    apiBaseCustom.required = useCustom;
+    if (useCustom && !apiBaseCustom.value) {
+      apiBaseCustom.value = apiBaseField.value || "";
+    }
+  }
+  if (useCustom) {
+    apiBaseField.value = apiBaseCustom ? apiBaseCustom.value.trim() : "";
+    if (!programmatic && apiBaseCustom) {
+      setTimeout(() => apiBaseCustom.focus(), 40);
+    }
+    setModelOptions([], true, true);
+    if (modelCustom) {
+      modelCustom.value = manualModelValue || "";
+    }
+    modelField.value = (manualModelValue || "").trim();
+    return;
+  }
+  apiBaseField.value = value;
+  const entry = state.discovery.servers.get(value);
+  setModelOptions(entry?.models || DEFAULT_MODEL_OPTIONS, programmatic, false);
+}
+
+function handleCustomServerInput() {
+  if (!apiBaseField || !apiBaseCustom) return;
+  apiBaseField.value = apiBaseCustom.value.trim();
+}
+
+function setModelOptions(models = [], programmatic = false, forceCustom = false) {
+  if (!modelSelect || !modelField) return;
+  modelSelect.disabled = false;
+  const source = Array.isArray(models) ? models : [];
+  const unique = Array.from(new Set(source.filter(Boolean)));
+  modelSelect.innerHTML = "";
+  unique.forEach((model) => {
+    const option = document.createElement("option");
+    option.value = model;
+    option.textContent = model;
+    modelSelect.appendChild(option);
+  });
+  const customOption = document.createElement("option");
+  customOption.value = CUSTOM_VALUE;
+  customOption.textContent = "Custom model...";
+  modelSelect.appendChild(customOption);
+  const previous = modelField.value;
+  const shouldUseCustom = forceCustom || (Boolean(previous) && !unique.includes(previous));
+  const fallback = unique[0] || DEFAULT_MODEL_OPTIONS[0];
+  if (shouldUseCustom || !unique.length) {
+    modelSelect.value = CUSTOM_VALUE;
+    handleModelSelection(true);
+    return;
+  }
+  if (previous && unique.includes(previous)) {
+    modelSelect.value = previous;
+  } else {
+    modelSelect.value = fallback;
+  }
+  handleModelSelection(programmatic);
+}
+
+function handleModelSelection(programmatic = false) {
+  if (!modelSelect || !modelField) return;
+  const value = modelSelect.value;
+  const useCustom = value === CUSTOM_VALUE;
+  if (modelCustom) {
+    modelCustom.hidden = !useCustom;
+    modelCustom.required = useCustom;
+  }
+  if (useCustom) {
+    if (modelCustom && !modelCustom.value) {
+      modelCustom.value = modelField.value || "";
+    }
+    modelField.value = modelCustom ? modelCustom.value.trim() : "";
+    if (!programmatic && modelCustom) {
+      setTimeout(() => modelCustom.focus(), 40);
+    }
+    return;
+  }
+  modelField.value = value;
+  if (modelCustom && !programmatic) {
+    modelCustom.value = "";
+  }
+}
+
+function handleCustomModelInput() {
+  if (!modelField || !modelCustom) return;
+  modelField.value = modelCustom.value.trim();
+}
+
+async function loadDiscovery(showFeedback = false) {
+  if (!serverSelect) return;
+  if (state.discovery.status === "loading") return;
+  state.discovery.status = "loading";
+  if (refreshDiscoveryBtn) {
+    refreshDiscoveryBtn.disabled = true;
+  }
+  try {
+    const response = await fetch("/api/discover");
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(text || response.statusText);
+    }
+    const payload = await response.json();
+    state.discovery.raw = payload;
+    const entries = buildServerEntries(payload);
+    setServerOptions(entries);
+    if (showFeedback) {
+      if (entries.length) {
+        showToast(`Found ${entries.length} server${entries.length === 1 ? "" : "s"}.`);
+      } else {
+        showToast("No vision servers detected yet.", "warn");
+      }
+    }
+  } catch (error) {
+    console.error("Discovery failed", error);
+    if (showFeedback) {
+      showToast("Server discovery failed - enter settings manually.", "error");
+    }
+    state.discovery.raw = null;
+    if (!state.discovery.servers.size) {
+      setServerOptions([], { allowDefaultFallback: true });
+    }
+  } finally {
+    state.discovery.status = "idle";
+    if (refreshDiscoveryBtn) {
+      refreshDiscoveryBtn.disabled = false;
+    }
+  }
+}
 
 function showToast(message, tone = "info") {
   toast.textContent = message;
@@ -348,6 +622,31 @@ function setDownloadReady(flag) {
   downloadBtn.disabled = !flag;
 }
 
+function openLightbox(src, alt, captionText) {
+  if (!lightbox || !lightboxImage) return;
+  lightboxImage.src = src;
+  lightboxImage.alt = alt || "Image preview";
+  if (lightboxCaption) {
+    lightboxCaption.textContent = captionText || "";
+    lightboxCaption.style.display = captionText ? "block" : "none";
+  }
+  lightbox.classList.add("lightbox--open");
+  lightbox.setAttribute("aria-hidden", "false");
+  lightboxClose?.focus();
+}
+
+function closeLightbox() {
+  if (!lightbox || !lightboxImage) return;
+  lightbox.classList.remove("lightbox--open");
+  lightbox.setAttribute("aria-hidden", "true");
+  lightboxImage.src = "";
+  lightboxImage.alt = "";
+  if (lightboxCaption) {
+    lightboxCaption.textContent = "";
+    lightboxCaption.style.display = "none";
+  }
+}
+
 function clearPreviews() {
   state.previews.forEach((url) => URL.revokeObjectURL(url));
   state.previews.clear();
@@ -366,18 +665,46 @@ function renderSelectedFiles() {
   state.files.forEach((file, index) => {
     const item = document.createElement("li");
     item.className = "file-pill";
-    item.innerHTML = `
-      <div class="file-pill__meta">
-        <span class="file-pill__name">${escapeHtml(file.name)}</span>
-        <span class="file-pill__details">${formatBytes(file.size)} | ${new Date(file.lastModified).toLocaleString()}</span>
-      </div>
-      <button type="button" class="btn btn--ghost" data-remove="${index}">Remove</button>
-    `;
-    const removeBtn = item.querySelector("[data-remove]");
+
+    const key = fileKey(file);
+    let previewUrl = state.previews.get(key);
+    if (!previewUrl) {
+      previewUrl = URL.createObjectURL(file);
+      state.previews.set(key, previewUrl);
+    }
+    if (previewUrl) {
+      const thumb = document.createElement("div");
+      thumb.className = "file-pill__thumb";
+      const img = document.createElement("img");
+      img.src = previewUrl;
+      img.alt = file.name ? `Preview of ${file.name}` : "Image preview";
+      thumb.appendChild(img);
+      item.appendChild(thumb);
+    }
+
+    const meta = document.createElement("div");
+    meta.className = "file-pill__meta";
+    const name = document.createElement("span");
+    name.className = "file-pill__name";
+    name.textContent = file.name || "Untitled image";
+    const details = document.createElement("span");
+    details.className = "file-pill__details";
+    details.textContent = `${formatBytes(file.size)} | ${new Date(file.lastModified).toLocaleString()}`;
+    meta.appendChild(name);
+    meta.appendChild(details);
+    item.appendChild(meta);
+
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "btn btn--ghost";
+    removeBtn.dataset.remove = index;
+    removeBtn.textContent = "Remove";
     removeBtn.addEventListener("click", (event) => {
       event.stopPropagation();
       removeFileAt(index);
     });
+    item.appendChild(removeBtn);
+
     fileList.appendChild(item);
   });
 }
@@ -434,10 +761,6 @@ function clearFiles() {
   state.files = [];
   fileInput.value = "";
   renderSelectedFiles();
-  resultsGrid.innerHTML = "";
-  statusLine.textContent = "Add images to get started.";
-  state.lastResult = null;
-  setDownloadReady(false);
 }
 
 function setBusy(flag) {
@@ -516,40 +839,60 @@ function renderResults(payload) {
     resultsGrid.appendChild(summaryCard);
   }
 
-  (payload.assets || []).forEach((asset) => {
-    const card = document.createElement("article");
-    card.className = "result-card";
+  const assets = payload.assets || [];
+  if (assets.length) {
+    const gallery = document.createElement("div");
+    gallery.className = "results__gallery";
+    assets.forEach((asset) => {
+      const tile = document.createElement("article");
+      tile.className = "results__tile";
 
-    const previewEntry = [...state.previews.entries()].find(([key]) =>
-      key.startsWith(`${asset.name}|`)
-    );
-    if (previewEntry) {
-      const img = document.createElement("img");
-      img.src = previewEntry[1];
-      img.alt = asset.name;
-      img.className = "result-card__preview";
-      card.appendChild(img);
-    }
+      const details = [
+        asset.meta?.width && asset.meta?.height && `${asset.meta.width}x${asset.meta.height}px`,
+        asset.meta?.size_bytes && formatBytes(asset.meta.size_bytes),
+        asset.meta?.mime,
+      ].filter(Boolean);
+      const metaText = details.join(" · ") || "Uploaded image";
 
-    const title = document.createElement("h3");
-    title.textContent = asset.name;
-    card.appendChild(title);
+      const previewEntry = [...state.previews.entries()].find(([key]) =>
+        key.startsWith(`${asset.name}|`)
+      );
+      if (previewEntry) {
+        const img = document.createElement("img");
+        img.src = previewEntry[1];
+        img.alt = asset.name;
+        tile.appendChild(img);
+        tile.classList.add("results__tile--clickable");
+        tile.addEventListener("click", () =>
+          openLightbox(previewEntry[1], asset.name, metaText)
+        );
+      } else {
+        tile.classList.add("results__tile--empty");
+        const placeholder = document.createElement("div");
+        placeholder.className = "results__tile-empty";
+        placeholder.textContent = "Preview unavailable";
+        tile.appendChild(placeholder);
+      }
 
-    const meta = document.createElement("div");
-    meta.className = "result-card__meta";
-    const details = [
-      asset.meta?.mime && `MIME ${asset.meta.mime}`,
-      asset.meta?.width && asset.meta?.height && `${asset.meta.width}x${asset.meta.height}px`,
-      asset.meta?.mode && `Mode ${asset.meta.mode}`,
-      asset.meta?.size_bytes && formatBytes(asset.meta.size_bytes),
-      asset.meta?.sha256 && `SHA ${asset.meta.sha256.slice(0, 10)}...`,
-    ].filter(Boolean);
-    meta.textContent = details.join(" | ");
-    card.appendChild(meta);
+      const caption = document.createElement("div");
+      caption.className = "results__caption";
+      const title = document.createElement("strong");
+      title.textContent = asset.name;
+      const metaLine = document.createElement("span");
+      metaLine.textContent = metaText;
+      caption.appendChild(title);
+      caption.appendChild(metaLine);
+      tile.appendChild(caption);
 
-    resultsGrid.appendChild(card);
-  });
-
+      gallery.appendChild(tile);
+    });
+    resultsGrid.appendChild(gallery);
+  } else {
+    const placeholder = document.createElement("p");
+    placeholder.className = "results__placeholder";
+    placeholder.textContent = "Images processed - upload more to keep exploring.";
+    resultsGrid.appendChild(placeholder);
+  }
 }
 
 function downloadResults() {
@@ -596,11 +939,47 @@ fileInput.addEventListener("change", (event) => {
   fileInput.value = "";
 });
 
+if (serverSelect) {
+  serverSelect.addEventListener("change", () => handleServerSelection(false));
+}
+if (refreshDiscoveryBtn) {
+  refreshDiscoveryBtn.addEventListener("click", () => loadDiscovery(true));
+}
+if (apiBaseCustom) {
+  apiBaseCustom.addEventListener("input", handleCustomServerInput);
+}
+if (modelSelect) {
+  modelSelect.addEventListener("change", () => handleModelSelection(false));
+}
+if (modelCustom) {
+  modelCustom.addEventListener("input", handleCustomModelInput);
+}
+
 browseBtn.addEventListener("click", () => fileInput.click());
 clearBtn.addEventListener("click", clearFiles);
 form.addEventListener("submit", submitForm);
 downloadBtn.addEventListener("click", downloadResults);
 
+if (lightbox) {
+  lightbox.addEventListener("click", (event) => {
+    if (
+      event.target === lightbox ||
+      event.target.dataset?.lightboxClose !== undefined
+    ) {
+      closeLightbox();
+    }
+  });
+}
+
+lightboxClose?.addEventListener("click", closeLightbox);
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && lightbox?.classList.contains("lightbox--open")) {
+    closeLightbox();
+  }
+});
+
+initializeServerControls();
 renderSelectedFiles();
 setDownloadReady(false);
-
+loadDiscovery();

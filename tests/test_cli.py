@@ -46,3 +46,40 @@ def test_cli_processes_images_and_deduplicates(tmp_path, image_factory, monkeypa
 def test_cli_rejects_invalid_extra(tmp_path):
     rc = cli.main([str(tmp_path), "--extra", "{not json}"])
     assert rc == 2
+
+
+def test_cli_auto_discover_picks_first_target(tmp_path, image_factory, monkeypatch):
+    images_dir = tmp_path / "imgs"
+    images_dir.mkdir()
+    image_factory(images_dir / "a.png")
+
+    out_path = tmp_path / "results.jsonl"
+    calls = []
+
+    def fake_chat_call(**kwargs):
+        calls.append(kwargs)
+        return {"choices": [{"message": {"content": "ok"}}]}
+
+    class DummyDiscovery:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def discover(self):
+            return {
+                "lm_studio": [
+                    {
+                        "server_address": "http://10.0.0.5:7777",
+                        "vision_models": ["autopilot"],
+                        "local_addresses": ["http://localhost:7777"],
+                    }
+                ],
+                "ollama": [],
+            }
+
+    monkeypatch.setattr(cli, "call_chat_completions", fake_chat_call)
+    monkeypatch.setattr(cli, "VisionModelDiscovery", DummyDiscovery)
+
+    rc = cli.main([str(images_dir), "--out", str(out_path), "--auto-discover", "--concurrency", "1"])
+    assert rc == 0
+    assert calls and calls[0]["api_base"] == "http://10.0.0.5:7777"
+    assert calls[0]["model"] == "autopilot"

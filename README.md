@@ -24,6 +24,7 @@ UltraVision autodetects common image extensions, batches requests, retries failu
 - **Batching & resuming:** `--per-request`, `--limit`, `--recursive`, `--patterns`, and `--concurrency` tune how images are grouped. `--resume` plus `--format jsonl` loads previously written SHA-256 hashes to skip duplicates.
 - **Outputs:** Supported formats are `jsonl`, `json`, `text`, `markdown`, or `csv`; the CLI defaults to `outputs.<format>`.
 - **Prompt control:** Customize `--system-prompt`, `--prompt`, temperature, `--max-tokens`, and inject arbitrary JSON with `--extra` (e.g., `{"top_p":0.9}`).
+- **Auto discovery:** `--auto-discover` scans for LM Studio/Ollama servers and selects the first vision-ready model; adjust the behavior with `--prefer-service`, custom ports, and `--discovery-models`.
 - **Image hygiene:** Add `--autorotate` and `--max-side` (Pillow) to normalize EXIF orientation and limit the largest dimension before uploading.
 - **Failure visibility:** Colored logging via `rich` (when available) plus `--fail-log` captures batches that exhaust retries.
 
@@ -47,6 +48,46 @@ uvicorn ultravision.web.server:app --reload
 ```
 
 Open [http://localhost:8000](http://localhost:8000), drag images into the page, and point the settings at your LM Studio endpoint. The server reuses the same helpers as the CLI so metadata, prompts, and output extraction stay consistent.
+
+UltraVision Studio pings `/api/discover` on load so the **Server** and **Model** dropdowns are pre-filled with any LM Studio or Ollama hosts on your network. Use the Refresh button to rescan or flip either control to **Custom** when you need to override the discovered values.
+
+## Docker
+
+Build the official container once from the repository root:
+
+```bash
+docker build -t ultravision .
+```
+
+Run the CLI by mounting your image directory(s) and wherever you want the outputs to land. The container defaults to the CLI entry point, so any argument you pass will be forwarded to `ultravision`:
+
+```bash
+docker run --rm -it \
+  -v "$(pwd)/images:/images" \
+  -v "$(pwd)/results:/results" \
+  ultravision \
+  /images \
+  --model qwen/qwen3-vl-8b \
+  --format jsonl \
+  --out /results/outputs.jsonl \
+  --api-base http://host.docker.internal:1234
+```
+
+Because LM Studio runs on the host, the container needs a way to reach `localhost:1234`. Use `--network host` on Linux (and keep `--api-base http://localhost:1234`), or add the host gateway alias when running on other platforms (`--add-host host.docker.internal:host-gateway`) and keep `--api-base http://host.docker.internal:1234`.
+
+Start the web companion by passing `web` as the first argument. This tells the container to run `ultravision-web` and lets you expose ports as usual:
+
+```bash
+docker run --rm -it -p 8000:8000 \
+  --add-host host.docker.internal:host-gateway \
+  ultravision \
+  web \
+  --host 0.0.0.0 \
+  --port 8000 \
+  --api-base http://host.docker.internal:1234
+```
+
+The browser UI will be reachable at [http://localhost:8000](http://localhost:8000) and still points to the same LM Studio endpoint you provide via `--api-base / --api-key`.
 
 ## Development & docs
 

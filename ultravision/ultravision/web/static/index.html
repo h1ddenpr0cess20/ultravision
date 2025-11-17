@@ -17,13 +17,13 @@
   <body>
     <div class="bg-waves" aria-hidden="true"></div>
     <main class="page">
-      <header class="hero">
+      <!-- <header class="hero">
         <div class="hero__badge">Image Analysis</div>
         <h1>UltraVision Studio</h1>
         <p class="hero__tagline">
-          Analyze images with LM Studio and Qwen to produce structured summaries.
+          Analyze images with local vision models.
         </p>
-      </header>
+      </header> -->
 
       <section class="workspace">
         <div class="panel panel--input">
@@ -58,23 +58,32 @@
 
               <aside class="settings">
                 <div class="settings__group">
-                  <label class="label" for="api-base">API Base</label>
+                  <div class="label-row">
+                    <label class="label" for="server-select">Server</label>
+                    <button type="button" class="btn btn--ghost btn--mini" id="refresh-discovery">Refresh</button>
+                  </div>
+                  <select id="server-select" class="input input--select" aria-label="Discovered servers"></select>
+                  <input id="api-base" name="api_base" type="hidden" value="">
                   <input
-                    id="api-base"
-                    name="api_base"
-                    class="input"
+                    id="api-base-custom"
+                    class="input input--stacked"
                     type="url"
-                    value="http://localhost:1234"
-                    required
+                    placeholder="http://localhost:1234"
+                    hidden
                   >
                 </div>
 
                 <div class="settings__group">
-                  <label class="label" for="model">Model</label>
-                  <select id="model" name="model" class="input input--select" required>
-                    <option value="qwen/qwen3-vl-8b" selected>qwen/qwen3-vl-8b</option>
-                    <option value="qwen/qwen3-vl-30b">qwen/qwen3-vl-30b</option>
-                  </select>
+                  <label class="label" for="model-select">Model</label>
+                  <select id="model-select" class="input input--select" aria-label="Discovered models"></select>
+                  <input id="model" name="model" type="hidden" value="">
+                  <input
+                    id="model-custom"
+                    class="input input--stacked"
+                    type="text"
+                    placeholder="qwen/qwen3-vl-8b"
+                    hidden
+                  >
                 </div>
 
                 <div class="settings__group">
@@ -246,6 +255,22 @@
     </main>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <div class="lightbox" id="image-lightbox" aria-hidden="true">
+      <div class="lightbox__backdrop" data-lightbox-close></div>
+      <div class="lightbox__content" role="dialog" aria-modal="true">
+        <button
+          type="button"
+          class="lightbox__close"
+          id="lightbox-close"
+          aria-label="Close image preview"
+        >
+          ×
+        </button>
+        <img id="lightbox-image" class="lightbox__image" src="" alt="" />
+        <p id="lightbox-caption" class="lightbox__caption"></p>
+      </div>
+    </div>
 
     <script type="module" src="/static/js/app.js"></script>
   </body>

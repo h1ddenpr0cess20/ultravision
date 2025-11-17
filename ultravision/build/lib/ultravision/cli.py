@@ -1,7 +1,6 @@
 """Command-line interface glue for UltraVision (batch vision requests and output writers)."""
 
 import argparse
-import asyncio
 from contextlib import nullcontext
 from pathlib import Path
 from typing import List
@@ -37,81 +36,6 @@ from .images import (
 )
 from .writer import Writer
 from .api import call_chat_completions
-from .discovery import VisionModelDiscovery, DEFAULT_VISION_MODEL_HINTS
-
-
-def _await_async(fn):
-    """Await ``fn`` (which must return a coroutine) even if a loop is already running."""
-
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = None
-
-    if loop and loop.is_running():  # pragma: no cover - rare in CLI contexts
-        temp_loop = asyncio.new_event_loop()
-        try:
-            return temp_loop.run_until_complete(fn())
-        finally:
-            temp_loop.close()
-    return asyncio.run(fn())
-
-
-def _select_discovery_target(results, prefer_service: str):
-    """Pick the first available target honoring ``prefer_service``."""
-
-    service_order = [prefer_service]
-    for candidate in ("lm_studio", "ollama"):
-        if candidate not in service_order:
-            service_order.append(candidate)
-
-    for service in service_order:
-        for server in results.get(service, []):
-            models = server.get("vision_models") or []
-            if models and server.get("server_address"):
-                return {
-                    "service": service,
-                    "api_base": server["server_address"],
-                    "model": models[0],
-                    "local_addresses": server.get("local_addresses", []),
-                }
-    return None
-
-
-def _auto_configure_target(args):
-    """Run discovery and map ``args`` to the first vision-capable server."""
-
-    extra_patterns = list(args.discovery_models) if args.discovery_models else []
-    discovery = VisionModelDiscovery(
-        lm_studio_port=args.lm_studio_port,
-        ollama_port=args.ollama_port,
-        timeout=float(args.discovery_timeout),
-        additional_vision_models=extra_patterns,
-    )
-    info("🔍 Auto-discovering LM Studio/Ollama servers...")
-    try:
-        results = _await_async(discovery.discover)
-    except Exception as exc:  # pragma: no cover - network failures
-        err(f"Discovery failed: {exc}")
-        return None
-
-    target = _select_discovery_target(results, args.prefer_service)
-    if not target:
-        warn("Auto-discovery could not find an accessible vision model. Falling back to manual settings.")
-        return None
-
-    info(
-        "✨ Auto-discovery selected"
-        f" {target['model']} on {target['api_base']} ({target['service']})."
-    )
-    extras = [addr for addr in target.get("local_addresses", []) if addr != target["api_base"]]
-    if extras:
-        info(
-            "   Other local URLs: "
-            + ", ".join(extras[:3])
-            + (" ..." if len(extras) > 3 else "")
-        )
-    return target
 
 def _prepare_batch(files: List[Path], args):
     """Prepare prompts and metadata for a single batch of images.
@@ -186,17 +110,6 @@ def main(argv=None):
     ap.add_argument("--model", default="qwen/qwen3-vl-8b", help="LM Studio model id (e.g., qwen/qwen3-vl-8b).")
     ap.add_argument("--api-base", default="http://localhost:1234", help="LM Studio base URL (no /v1).")
     ap.add_argument("--api-key", default="lm-studio", help="Bearer token header (LM Studio ignores value).")
-    ap.add_argument("--auto-discover", action="store_true", help="Auto-detect LM Studio/Ollama hosts and select the first vision model.")
-    ap.add_argument("--prefer-service", choices=["lm_studio", "ollama"], default="lm_studio",
-                    help="When auto-discovering, prefer this service type first.")
-    ap.add_argument("--lm-studio-port", type=int, default=1234,
-                    help="Port used when auto-discovering LM Studio (default 1234).")
-    ap.add_argument("--ollama-port", type=int, default=11434,
-                    help="Port used when auto-discovering Ollama (default 11434).")
-    ap.add_argument("--discovery-timeout", type=float, default=2.0,
-                    help="Timeout applied to discovery HTTP calls (seconds).")
-    ap.add_argument("--discovery-models", nargs="*", default=DEFAULT_VISION_MODEL_HINTS,
-                    help="Additional substrings treated as vision models during auto-discovery.")
 
     ap.add_argument("--prompt", default="Describe the image succinctly with key details.", help="User prompt.")
     ap.add_argument("--system-prompt", default="You are a precise, concise vision assistant.", help="System prompt.")
@@ -240,14 +153,6 @@ def main(argv=None):
         except Exception as e:
             err(f"Invalid --extra JSON: {e}")
             return 2
-
-    if args.auto_discover:
-        target = _auto_configure_target(args)
-        if not target:
-            err("Auto-discovery failed to find an accessible LM Studio/Ollama server.")
-            return 2
-        args.api_base = target["api_base"]
-        args.model = target["model"]
 
     # Collect files
     root = args.directory
