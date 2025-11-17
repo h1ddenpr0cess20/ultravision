@@ -1,6 +1,6 @@
 # UltraVision
 
-UltraVision is a fast, resilient batch image processor that pairs LM Studio (or any OpenAI-compatible vision model) with a CLI + web companion. Run it locally to describe folders of images, resume interrupted runs, deduplicate by hash, or spin up a browser-based studio for drag-and-drop uploads.
+UltraVision is a fast, resilient batch image processor that pairs LM Studio, Ollama, or any OpenAI-compatible vision model with a CLI + web companion. Run it locally to describe folders of images, resume interrupted runs, deduplicate by hash, or spin up a browser-based studio for drag-and-drop uploads.
 
 ## Features
 
@@ -29,7 +29,9 @@ UltraVision is a fast, resilient batch image processor that pairs LM Studio (or 
    pip install -e ".[dev]"
    ```
 
-2. **Start LM Studio** (default `http://localhost:1234`) with `qwen/qwen3-vl-8b` or another vision-enabled model.
+2. **Start LM Studio or Ollama**
+   - LM Studio: default `http://localhost:1234` with `qwen/qwen3-vl-8b` or another vision-enabled model.
+   - Ollama: ensure the Ollama daemon is running (`ollama serve`), pull a multimodal model (e.g., `ollama pull llava:13b`), and expose it on the default port `http://localhost:11434`.
 
 3. **Run UltraVision**
    ```bash
@@ -40,6 +42,20 @@ UltraVision is a fast, resilient batch image processor that pairs LM Studio (or 
    ```bash
    ultravision ./images --auto-discover --format jsonl --out results.jsonl
    ```
+
+### Connecting manually to Ollama
+
+If you prefer to point the CLI at a specific Ollama instance, pass the default Ollama base URL (`http://localhost:11434`) plus the Ollama model id:
+
+```bash
+ultravision ./images \
+  --api-base http://localhost:11434 \
+  --model llava:13b \
+  --format jsonl \
+  --out ollama-results.jsonl
+```
+
+When using Docker, remember to forward the Ollama port or add the `host.docker.internal` alias so the container can reach `localhost:11434`.
 
 UltraVision autodetects common image extensions, batches requests, retries failures with backoff, and writes the outputs in the format you choose.
 

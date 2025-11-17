@@ -7,7 +7,7 @@ UltraVision is a fast, resilient batch image processor that pairs with LM Studio
 - **Batch processing:** recursive scans, glob filters, per-request batching, resume/dedup, smart retries, and concurrency controls.
 - **Multi-format outputs:** JSONL, JSON, plain text, Markdown, and CSV writers share a common extraction pipeline.
 - **Image hygiene:** optional EXIF autorotate, resizing, and mime/hash metadata for reliable deduplication.
-- **Auto-discovery:** probes localhost and LAN hosts for LM Studio/Ollama vision servers so the CLI and web UI can auto-fill `api_base`/`model` values and reuse a shared set of vision model hints.
+- **Auto-discovery & connectors:** works with both LM Studio and Ollama vision servers, probing localhost/LAN hosts to auto-fill `api_base`/`model` values while reusing a shared set of vision model hints.
 - **Web companion:** a FastAPI-backed web interface that mirrors CLI settings and provides a rich drag-and-drop experience.
 - **Extensible helpers:** shared utilities for API calls, data transformation, and concurrency allow consistent behavior across binaries and UIs.
 

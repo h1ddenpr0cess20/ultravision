@@ -142,12 +142,16 @@ class VisionModelDiscovery:
             async with session.get(f"{base_url}/v1/models", timeout=timeout) as response:
                 if response.status != 200:
                     return []
-                data = await response.json()
+                payload = await response.json()
         except Exception:
             return []
 
+        entries = payload.get("data") or payload.get("models")
+        if not isinstance(entries, list):
+            entries = []
+
         vision_models: List[str] = []
-        for row in data.get("data", []):
+        for row in entries:
             model_id = row.get("id", "")
             if model_id and self._is_vision_model(model_id):
                 vision_models.append(model_id)
