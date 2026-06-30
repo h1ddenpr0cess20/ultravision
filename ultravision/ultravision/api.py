@@ -1,5 +1,7 @@
 """Helpers for calling LM Studio/OpenAI-compatible chat completions."""
 
+from __future__ import annotations
+
 import json
 import requests
 
