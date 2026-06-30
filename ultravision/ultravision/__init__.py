@@ -1,4 +1,4 @@
 """UltraVision package metadata and entrypoints."""
 
-__all__ = ["cli", "api", "images", "writer", "util"]
-__version__ = "0.1.0"
+__all__ = ["cli", "api", "images", "writer", "util", "discovery"]
+__version__ = "0.2.0"

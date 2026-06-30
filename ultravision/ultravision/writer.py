@@ -14,6 +14,15 @@ class Writer:
     the same response payload into the desired layout.
     """
     def __init__(self, path: Path, fmt: str, append: bool = False):
+        """Configure the writer.
+
+        Args:
+            path (Path): Destination file path.
+            fmt (str): Output format (``jsonl``, ``json``, ``text``, ``markdown``, or ``csv``).
+            append (bool): When ``True`` and ``fmt`` is ``jsonl``, append to an
+                existing file (used for ``--resume``) instead of truncating it.
+                Ignored for non-jsonl formats, which are not line-oriented.
+        """
         self.path = path
         self.fmt = fmt
         self.append = append
