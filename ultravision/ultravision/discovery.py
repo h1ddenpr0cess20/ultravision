@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import os
-import re
 import socket
 import struct
 from typing import Dict, Iterator, List, Optional, Set, Tuple
@@ -36,11 +35,10 @@ class VisionModelDiscovery:
         self.lm_studio_port = lm_studio_port
         self.ollama_port = ollama_port
         self.timeout = timeout
-        self.additional_vision_models = additional_vision_models or []
-        self.qwen_patterns = [
-            re.compile(r"qwen\d+(\.\d+)?-?vl", re.IGNORECASE),
-            re.compile(r"qwen/qwen\d+(\.\d+)?-?vl", re.IGNORECASE),
-        ]
+        # Extra model-id substrings the caller wants treated as vision-capable,
+        # used to force-include models that a server doesn't advertise. Capability
+        # metadata is the primary signal; these are just an override hatch.
+        self.additional_vision_models = [h.lower() for h in (additional_vision_models or [])]
         self._running_in_container = self._detect_container_environment()
 
     @staticmethod
@@ -163,18 +161,11 @@ class VisionModelDiscovery:
         potential_hosts.update(gateway_hosts - local_ips)
         return potential_hosts
 
-    def _is_vision_model(self, model_name: str) -> bool:
-        """Return ``True`` when the model id looks like a multimodal/vision model."""
+    def _name_hinted(self, model_id: str) -> bool:
+        """Return ``True`` if the id matches a caller-supplied vision hint."""
 
-        for pattern in self.qwen_patterns:
-            if pattern.search(model_name):
-                return True
-
-        model_lower = model_name.lower()
-        for needle in self.additional_vision_models:
-            if needle.lower() in model_lower:
-                return True
-        return False
+        lowered = model_id.lower()
+        return any(needle in lowered for needle in self.additional_vision_models)
 
     async def _check_port(self, host: str, port: int) -> bool:
         """Quick async port probe."""
@@ -192,28 +183,141 @@ class VisionModelDiscovery:
         except Exception:
             return False
 
-    async def _fetch_models(self, session: aiohttp.ClientSession, base_url: str) -> List[str]:
-        """Return the filtered models from a `/v1/models` endpoint."""
+    async def _get_json(
+        self,
+        session: aiohttp.ClientSession,
+        url: str,
+        *,
+        method: str = "GET",
+        payload: Optional[Dict] = None,
+    ) -> Optional[Dict]:
+        """GET/POST ``url`` and return parsed JSON, or ``None`` on any failure."""
 
         try:
             timeout = aiohttp.ClientTimeout(total=self.timeout, connect=0.5)
-            async with session.get(f"{base_url}/v1/models", timeout=timeout) as response:
+            if method == "POST":
+                ctx = session.post(url, json=payload, timeout=timeout)
+            else:
+                ctx = session.get(url, timeout=timeout)
+            async with ctx as response:
                 if response.status != 200:
-                    return []
-                payload = await response.json()
+                    return None
+                return await response.json()
         except Exception:
-            return []
+            return None
 
+    async def _fetch_models(
+        self,
+        session: aiohttp.ClientSession,
+        base_url: str,
+        service_type: Optional[str] = None,
+    ) -> List[str]:
+        """Return the candidate model ids for a reachable server.
+
+        Vision capability is read from provider metadata so *any* vision model is
+        detected regardless of its name: LM Studio's native ``/api/v0/models``
+        exposes a ``type`` of ``vlm``, and Ollama's ``/api/show`` reports a
+        ``capabilities`` list containing ``vision``. When that metadata is
+        unavailable (older servers, plain OpenAI-compatible backends) we list
+        every model from ``/v1/models`` rather than hide the server.
+        """
+
+        if service_type == "lm_studio":
+            vlms = await self._fetch_lmstudio_vlms(session, base_url)
+            if vlms is not None:
+                return vlms
+        elif service_type == "ollama":
+            vision = await self._fetch_ollama_vision(session, base_url)
+            if vision is not None:
+                return vision
+        return await self._fetch_all_models(session, base_url)
+
+    async def _fetch_all_models(self, session: aiohttp.ClientSession, base_url: str) -> List[str]:
+        """List every model id from the OpenAI-compatible ``/v1/models`` endpoint."""
+
+        payload = await self._get_json(session, f"{base_url}/v1/models")
+        if not payload:
+            return []
         entries = payload.get("data") or payload.get("models")
         if not isinstance(entries, list):
-            entries = []
+            return []
+        return [row.get("id", "") for row in entries if isinstance(row, dict) and row.get("id")]
 
-        vision_models: List[str] = []
+    async def _fetch_lmstudio_vlms(
+        self, session: aiohttp.ClientSession, base_url: str
+    ) -> Optional[List[str]]:
+        """Vision models from LM Studio's native API (``type == 'vlm'``).
+
+        Returns ``None`` when the native endpoint is unavailable so the caller
+        falls back to listing all models.
+        """
+
+        payload = await self._get_json(session, f"{base_url}/api/v0/models")
+        if not payload:
+            return None
+        entries = payload.get("data") or payload.get("models")
+        if not isinstance(entries, list):
+            return None
+        models = []
         for row in entries:
+            if not isinstance(row, dict):
+                continue
             model_id = row.get("id", "")
-            if model_id and self._is_vision_model(model_id):
-                vision_models.append(model_id)
-        return vision_models
+            if not model_id:
+                continue
+            if str(row.get("type", "")).lower() == "vlm" or self._name_hinted(model_id):
+                models.append(model_id)
+        return models
+
+    async def _fetch_ollama_vision(
+        self, session: aiohttp.ClientSession, base_url: str
+    ) -> Optional[List[str]]:
+        """Vision models from Ollama via ``/api/tags`` + ``/api/show`` capabilities.
+
+        Returns ``None`` when ``/api/tags`` is unavailable. If the server is too
+        old to report capabilities at all, every tag is returned rather than
+        dropping the server.
+        """
+
+        tags = await self._get_json(session, f"{base_url}/api/tags")
+        if not tags:
+            return None
+        rows = tags.get("models")
+        if not isinstance(rows, list):
+            return None
+        names = [
+            (row.get("model") or row.get("name"))
+            for row in rows
+            if isinstance(row, dict) and (row.get("model") or row.get("name"))
+        ]
+        if not names:
+            return []
+
+        async def _capabilities(name: str) -> Tuple[str, Optional[List[str]]]:
+            info = await self._get_json(
+                session, f"{base_url}/api/show", method="POST", payload={"model": name}
+            )
+            caps = (info or {}).get("capabilities")
+            return name, caps if isinstance(caps, list) else None
+
+        results = await asyncio.gather(
+            *(_capabilities(name) for name in names), return_exceptions=True
+        )
+        vision: List[str] = []
+        saw_capabilities = False
+        for result in results:
+            if not isinstance(result, tuple):
+                continue
+            name, caps = result
+            if caps is not None:
+                saw_capabilities = True
+                if "vision" in caps or self._name_hinted(name):
+                    vision.append(name)
+            elif self._name_hinted(name):
+                vision.append(name)
+        # Older Ollama builds expose no capability metadata; surface everything
+        # so the server stays usable instead of vanishing.
+        return vision if saw_capabilities else names
 
     async def _discover_localhost(self, session: aiohttp.ClientSession) -> Dict[str, Optional[Dict]]:
         """Return ``lm_studio`` / ``ollama`` entries found on localhost."""
@@ -222,7 +326,9 @@ class VisionModelDiscovery:
         results: Dict[str, Optional[Dict]] = {"lm_studio": None, "ollama": None}
 
         if await self._check_port("127.0.0.1", self.lm_studio_port):
-            models = await self._fetch_models(session, f"http://127.0.0.1:{self.lm_studio_port}")
+            models = await self._fetch_models(
+                session, f"http://127.0.0.1:{self.lm_studio_port}", "lm_studio"
+            )
             if models:
                 results["lm_studio"] = {
                     "server_address": f"http://127.0.0.1:{self.lm_studio_port}",
@@ -233,7 +339,9 @@ class VisionModelDiscovery:
                 }
 
         if await self._check_port("127.0.0.1", self.ollama_port):
-            models = await self._fetch_models(session, f"http://127.0.0.1:{self.ollama_port}")
+            models = await self._fetch_models(
+                session, f"http://127.0.0.1:{self.ollama_port}", "ollama"
+            )
             if models:
                 results["ollama"] = {
                     "server_address": f"http://127.0.0.1:{self.ollama_port}",
@@ -306,7 +414,7 @@ class VisionModelDiscovery:
     ) -> Tuple[str, Optional[Dict]]:
         """Return structured info for a reachable server."""
 
-        models = await self._fetch_models(session, url)
+        models = await self._fetch_models(session, url, service_type)
         if models:
             return (
                 service_type,

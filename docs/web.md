@@ -51,7 +51,7 @@ Accepts multipart uploads and proxies them through LM Studio.
 Returns the discovery payload that the CLI and Studio UI share when locating LM Studio/Ollama vision servers.
 
 - **Behavior:**
-  1. Runs `VisionModelDiscovery`, which probes the default hosts (local loopback, Docker gateways, and LAN ranges) on the LM Studio and Ollama ports, fetches `/v1/models`, and filters for vision-capable IDs (e.g., `qwen*vl` plus any hints such as `gemma3`).
+  1. Runs `VisionModelDiscovery`, which probes the default hosts (local loopback, Docker gateways, and LAN ranges) on the LM Studio and Ollama ports and identifies vision models from each provider's capability metadata — LM Studio's native `/api/v0/models` (`type == "vlm"`) and Ollama's `/api/show` (`capabilities` containing `vision`). Any vision model is detected regardless of its name; servers that don't expose capability metadata fall back to listing every `/v1/models` entry so they are never hidden.
   2. Reports each service (`lm_studio`, `ollama`) with a `server_address`, optional `local_addresses`, and the discovered `vision_models`.
   3. Honors the `timeout` query parameter (default `2.0` seconds) and raises `HTTP 502` if an unexpected error occurs while probing.
 
