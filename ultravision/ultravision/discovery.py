@@ -11,7 +11,11 @@ import struct
 from typing import Dict, Iterator, List, Optional, Set, Tuple
 
 import aiohttp
-import psutil
+
+try:  # psutil enriches interface discovery but must not be mandatory:
+    import psutil  # a missing/broken psutil should not disable discovery entirely.
+except Exception:  # pragma: no cover - exercised via the no-psutil fallback path
+    psutil = None
 
 DEFAULT_VISION_MODEL_HINTS = ("gemma3",)
 DOCKER_HOST_ALIASES = ("host.docker.internal",)
@@ -40,13 +44,54 @@ class VisionModelDiscovery:
         self._running_in_container = self._detect_container_environment()
 
     @staticmethod
-    def _iter_inet_addresses() -> Iterator[Tuple[str, Optional[str]]]:
-        """Yield ``(ip, netmask)`` for every IPv4 address on the host."""
+    def _primary_local_ip() -> Optional[str]:
+        """Best-effort primary IPv4 address via the outbound-socket trick.
 
-        for addrs in psutil.net_if_addrs().values():
-            for addr in addrs:
-                if addr.family == socket.AF_INET and addr.address:
-                    yield addr.address, addr.netmask
+        Opens a UDP socket toward a public address (no packets are actually
+        sent) and reads back the local address the OS would route through.
+        Works on every platform without psutil/netifaces, so LAN discovery
+        keeps functioning even when richer enumeration is unavailable.
+        """
+
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            sock.connect(("8.8.8.8", 80))
+            return sock.getsockname()[0]
+        except OSError:
+            return None
+        finally:
+            sock.close()
+
+    @classmethod
+    def _iter_inet_addresses(cls) -> Iterator[Tuple[str, Optional[str]]]:
+        """Yield ``(ip, netmask)`` for every usable IPv4 address on the host.
+
+        Uses psutil for full per-interface detail when it is importable, and
+        always includes the primary outbound IP (assuming a ``/24`` subnet) so
+        discovery still scans the local network when psutil is missing or
+        returns nothing useful.
+        """
+
+        seen_with_mask: Set[str] = set()
+        if psutil is not None:
+            try:
+                interfaces = psutil.net_if_addrs()
+            except Exception:
+                interfaces = {}
+            for addrs in interfaces.values():
+                for addr in addrs:
+                    if addr.family == socket.AF_INET and addr.address:
+                        yield addr.address, addr.netmask
+                        if addr.netmask:
+                            seen_with_mask.add(addr.address)
+
+        # Supply the primary IP with an assumed /24 unless psutil already gave
+        # it to us *with* a netmask — covers a missing psutil and interfaces
+        # reported without a netmask, either of which would otherwise leave the
+        # active subnet unscanned.
+        primary = cls._primary_local_ip()
+        if primary and primary not in seen_with_mask and not primary.startswith("127."):
+            yield primary, "255.255.255.0"
 
     def _get_local_addresses(self) -> Set[str]:
         """Return localhost aliases and interface IPs."""
