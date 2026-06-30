@@ -168,14 +168,42 @@ async def discover_servers(timeout: float = 2.0):
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
-def run(host: str = "0.0.0.0", port: int = 8000, reload: bool = True) -> None:
+def run(host: str = "0.0.0.0", port: int = 8000, reload: bool = False) -> None:
     """Start the FastAPI server for UltraVision Studio.
 
     Args:
         host (str): Host/IP to bind to.
         port (int): Port number for incoming connections.
-        reload (bool): Whether to enable auto-reload for development.
+        reload (bool): Enable auto-reload for development. Off by default;
+            do not enable it in containers or production, where it adds a
+            file-watcher process and the ``watchfiles`` dependency.
     """
     import uvicorn
 
     uvicorn.run("ultravision.web.server:app", host=host, port=port, reload=reload)
+
+
+def main(argv=None) -> None:
+    """Console entry point for ``ultravision-web``.
+
+    Parses ``--host``/``--port``/``--reload`` so the server is configurable from
+    the command line (and the Docker entrypoint), then starts it.
+
+    Args:
+        argv (Sequence[str] | None): Override for CLI arguments from ``sys.argv``.
+    """
+    import argparse
+
+    ap = argparse.ArgumentParser(
+        prog="ultravision-web",
+        description="Serve the UltraVision Studio web companion.",
+    )
+    ap.add_argument("--host", default="0.0.0.0", help="Host/IP to bind (default 0.0.0.0).")
+    ap.add_argument("--port", type=int, default=8000, help="Port to listen on (default 8000).")
+    ap.add_argument(
+        "--reload",
+        action="store_true",
+        help="Enable auto-reload for development (do not use in production).",
+    )
+    args = ap.parse_args(argv)
+    run(host=args.host, port=args.port, reload=args.reload)

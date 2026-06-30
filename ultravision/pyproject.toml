@@ -29,7 +29,7 @@ dev = [
 
 [project.scripts]
 ultravision = "ultravision.cli:main"
-ultravision-web = "ultravision.web.server:run"
+ultravision-web = "ultravision.web.server:main"
 
 [tool.setuptools.dynamic]
 version = { attr = "ultravision.__version__" }

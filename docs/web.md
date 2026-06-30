@@ -8,10 +8,12 @@ Ensure you have FastAPI/uvicorn installed and either your LM Studio (default `12
 
 ```bash
 pip install ./ultravision
-uvicorn ultravision.web.server:app --reload
+ultravision-web --host 0.0.0.0 --port 8000
 ```
 
-Then point your browser to [http://localhost:8000](http://localhost:8000). The static assets (React-like single-page app shipped under `ultravision/web/static`) handle the UI.
+`ultravision-web` accepts `--host`, `--port`, and `--reload`. Auto-reload is **off by default** (it is a development-only feature that spawns a file watcher and pulls in `watchfiles`); pass `--reload` only when iterating locally. For ad-hoc development you can also run uvicorn directly: `uvicorn ultravision.web.server:app --reload`.
+
+Then point your browser to [http://localhost:8000](http://localhost:8000). The static assets (single-page app shipped under `ultravision/web/static`) handle the UI.
 
 ### Connecting to LM Studio or Ollama
 
@@ -59,4 +61,5 @@ The UltraVision Studio frontend calls this endpoint on load (and whenever you hi
 
 - The server adds CORS middleware that allows all origins for convenience; tighten it if embedding UltraVision in trusted environments.
 - The static assets are served from `ultravision/web/static`. Rebuilding the frontend must place `index.html` and friends under this directory before shipping.
-- Use `uvicorn --reload` during development so code changes automatically take effect.
+- Pass `ultravision-web --reload` (or run `uvicorn --reload`) during development so code changes take effect automatically. Leave reload off in containers and production.
+- In Docker, start this server with `docker run -p 8000:8000 <image> web --host 0.0.0.0 --port 8000`; the image `EXPOSE`s `8000`. Connection details (LM Studio/Ollama endpoint, key, model) are entered in the browser UI, not passed to `ultravision-web`.
