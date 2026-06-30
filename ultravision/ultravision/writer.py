@@ -54,7 +54,7 @@ class Writer:
         elif self.fmt == "text":
             self._fp.write(f"# {', '.join(record['files'])}\n{text}\n\n")
         elif self.fmt == "markdown":
-            self._fp.write(f"### Files\n- " + "\n- ".join(record["files"]) + "\n\n")
+            self._fp.write("### Files\n- " + "\n- ".join(record["files"]) + "\n\n")
             self._fp.write("### Output\n")
             self._fp.write(text.strip() + "\n\n---\n\n")
         elif self.fmt == "csv":

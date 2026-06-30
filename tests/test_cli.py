@@ -43,6 +43,36 @@ def test_cli_processes_images_and_deduplicates(tmp_path, image_factory, monkeypa
     assert all("text" in p for p in payloads)
 
 
+def test_cli_resume_preserves_existing_and_skips_done(tmp_path, image_factory, monkeypatch):
+    images_dir = tmp_path / "imgs"
+    images_dir.mkdir()
+    image_factory(images_dir / "a.png")
+    out_path = tmp_path / "results.jsonl"
+
+    calls = []
+
+    def fake_chat_call(**kwargs):
+        calls.append(kwargs)
+        return {"choices": [{"message": {"content": f"resp {len(calls)}"}}]}
+
+    monkeypatch.setattr(cli, "call_chat_completions", fake_chat_call)
+
+    base_args = [str(images_dir), "--out", str(out_path), "--concurrency", "1"]
+
+    # First pass processes the single image.
+    assert cli.main(base_args) == 0
+    assert len(calls) == 1
+
+    # Add a second image, then resume: the first must be skipped and its record
+    # preserved (the writer must not truncate the existing output).
+    image_factory(images_dir / "b.png", size=(16, 16))
+    assert cli.main(base_args + ["--resume"]) == 0
+    assert len(calls) == 2  # only the new image triggered a call
+
+    lines = [line for line in out_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert len(lines) == 2  # original record survived alongside the new one
+
+
 def test_cli_rejects_invalid_extra(tmp_path):
     rc = cli.main([str(tmp_path), "--extra", "{not json}"])
     assert rc == 2

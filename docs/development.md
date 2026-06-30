@@ -20,14 +20,21 @@ This section codifies expectations for contributors who touch documentation, doc
 
 ## Testing and validation
 
-Run the existing test suite before merging:
+Run the existing test suite before merging. The packaging metadata lives in the
+`ultravision/` subdirectory, so install from there, then run `pytest` from the
+repository root:
 
 ```bash
-pip install -e '.[dev]'
+pip install -e './ultravision[dev]'
 pytest
 ```
 
-The tests focus on image helpers, writers, resume behavior, and concurrency logic. Keep tests in sync when changing functionality, especially around deduplication or resume.
+The tests focus on the API client, image helpers, writers, resume behavior, and
+concurrency logic. Keep tests in sync when changing functionality, especially
+around deduplication or resume.
+
+GitHub Actions (`.github/workflows/ci.yml`) runs the same suite on every push to
+`main` and on pull requests across the supported Python versions.
 
 ## Packaging and release
 

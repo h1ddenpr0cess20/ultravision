@@ -6,10 +6,12 @@ import asyncio
 import ipaddress
 import os
 import re
-from typing import Dict, List, Optional, Set, Tuple
+import socket
+import struct
+from typing import Dict, Iterator, List, Optional, Set, Tuple
 
 import aiohttp
-import netifaces
+import psutil
 
 DEFAULT_VISION_MODEL_HINTS = ("gemma3",)
 DOCKER_HOST_ALIASES = ("host.docker.internal",)
@@ -37,34 +39,51 @@ class VisionModelDiscovery:
         ]
         self._running_in_container = self._detect_container_environment()
 
+    @staticmethod
+    def _iter_inet_addresses() -> Iterator[Tuple[str, Optional[str]]]:
+        """Yield ``(ip, netmask)`` for every IPv4 address on the host."""
+
+        for addrs in psutil.net_if_addrs().values():
+            for addr in addrs:
+                if addr.family == socket.AF_INET and addr.address:
+                    yield addr.address, addr.netmask
+
     def _get_local_addresses(self) -> Set[str]:
         """Return localhost aliases and interface IPs."""
 
         local_ips = {"127.0.0.1", "localhost"}
-        for interface in netifaces.interfaces():
-            addrs = netifaces.ifaddresses(interface)
-            if netifaces.AF_INET in addrs:
-                for addr in addrs[netifaces.AF_INET]:
-                    ip = addr.get("addr")
-                    if ip:
-                        local_ips.add(ip)
+        for ip, _netmask in self._iter_inet_addresses():
+            local_ips.add(ip)
         return local_ips
 
     def _get_default_gateways(self) -> Set[str]:
-        """Return IPv4 gateway addresses (often the Docker host from containers)."""
+        """Return IPv4 gateway addresses (often the Docker host from containers).
+
+        psutil does not expose routing information, so we parse Linux's
+        ``/proc/net/route`` directly. On platforms without it (or when the file
+        cannot be read) we simply return no gateways.
+        """
 
         gateways: Set[str] = set()
         try:
-            gateway_info = netifaces.gateways()
-        except Exception:
+            with open("/proc/net/route", "rt", encoding="utf-8") as handle:
+                rows = handle.readlines()
+        except OSError:
             return gateways
 
-        default_entries = gateway_info.get("default", {})
-        ipv4_default = default_entries.get(netifaces.AF_INET)
-        if ipv4_default:
-            gateway = ipv4_default[0] if isinstance(ipv4_default, (list, tuple)) else ipv4_default
-            if gateway:
-                gateways.add(str(gateway))
+        for line in rows[1:]:  # skip the header row
+            fields = line.split()
+            if len(fields) < 3:
+                continue
+            destination, gateway_hex = fields[1], fields[2]
+            if destination != "00000000":  # only the default route
+                continue
+            try:
+                gateway = socket.inet_ntoa(struct.pack("<L", int(gateway_hex, 16)))
+            except (ValueError, struct.error, OSError):
+                continue
+            if gateway and gateway != "0.0.0.0":
+                gateways.add(gateway)
 
         return gateways
 
@@ -74,34 +93,28 @@ class VisionModelDiscovery:
         local_ips = self._get_local_addresses()
         potential_hosts: Set[str] = set()
         gateway_hosts = self._get_default_gateways()
-        for interface in netifaces.interfaces():
-            addrs = netifaces.ifaddresses(interface)
-            if netifaces.AF_INET not in addrs:
+        for ip, netmask in self._iter_inet_addresses():
+            if not ip or not netmask or ip.startswith("127."):
                 continue
-            for addr in addrs[netifaces.AF_INET]:
-                ip = addr.get("addr")
-                netmask = addr.get("netmask")
-                if not ip or not netmask or ip.startswith("127."):
-                    continue
-                try:
-                    network = ipaddress.IPv4Network(f"{ip}/{netmask}", strict=False)
-                except Exception:
-                    continue
-                host_limit = (
-                    MAX_NETWORK_SCAN_HOSTS if network.num_addresses > MAX_NETWORK_SCAN_HOSTS + 2 else None
-                )
-                count = 0
-                try:
-                    for host in network.hosts():
-                        host_str = str(host)
-                        if host_str in local_ips:
-                            continue
-                        potential_hosts.add(host_str)
-                        count += 1
-                        if host_limit is not None and count >= host_limit:
-                            break
-                except Exception:
-                    continue
+            try:
+                network = ipaddress.IPv4Network(f"{ip}/{netmask}", strict=False)
+            except Exception:
+                continue
+            host_limit = (
+                MAX_NETWORK_SCAN_HOSTS if network.num_addresses > MAX_NETWORK_SCAN_HOSTS + 2 else None
+            )
+            count = 0
+            try:
+                for host in network.hosts():
+                    host_str = str(host)
+                    if host_str in local_ips:
+                        continue
+                    potential_hosts.add(host_str)
+                    count += 1
+                    if host_limit is not None and count >= host_limit:
+                        break
+            except Exception:
+                continue
         potential_hosts.update(gateway_hosts - local_ips)
         return potential_hosts
 
@@ -314,28 +327,6 @@ class VisionModelDiscovery:
         results["lm_studio"].extend(network_results["lm_studio"])
         results["ollama"].extend(network_results["ollama"])
         return results
-
-    async def discover_lm_studio(self) -> List[Dict]:
-        """Return only LM Studio hosts."""
-
-        old_port = self.ollama_port
-        self.ollama_port = 0
-        try:
-            results = await self.discover()
-        finally:
-            self.ollama_port = old_port
-        return results["lm_studio"]
-
-    async def discover_ollama(self) -> List[Dict]:
-        """Return only Ollama hosts."""
-
-        old_port = self.lm_studio_port
-        self.lm_studio_port = 0
-        try:
-            results = await self.discover()
-        finally:
-            self.lm_studio_port = old_port
-        return results["ollama"]
 
 
 __all__ = ["VisionModelDiscovery", "DEFAULT_VISION_MODEL_HINTS"]

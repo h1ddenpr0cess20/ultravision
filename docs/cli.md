@@ -7,7 +7,7 @@ The CLI (`ultravision`) is the most direct way to process large image sets with 
 Install the package and invoke the CLI from the directory containing your images:
 
 ```bash
-pip install .
+pip install ./ultravision
 ultravision ./images --model qwen/qwen3-vl-8b --format jsonl --out results.jsonl
 ```
 

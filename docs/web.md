@@ -7,7 +7,7 @@ The FastAPI-based web companion mirrors the CLI experience with a browsable drag
 Ensure you have FastAPI/uvicorn installed and either your LM Studio (default `1234`) or Ollama (`11434`) server running:
 
 ```bash
-pip install .
+pip install ./ultravision
 uvicorn ultravision.web.server:app --reload
 ```
 

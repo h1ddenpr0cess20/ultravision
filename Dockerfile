@@ -7,10 +7,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential \
-    && rm -rf /var/lib/apt/lists/*
-
 COPY ultravision/pyproject.toml ./pyproject.toml
 COPY ultravision/requirements.txt ./requirements.txt
 COPY README.md ./README.md
