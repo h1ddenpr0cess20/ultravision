@@ -30,13 +30,14 @@ except Exception:
     def warn(msg): print(f"[WARN] {msg}")
     def err(msg):  print(f"[ERROR] {msg}")
 
+from . import __version__
 from .util import backoff_sleep, run_concurrently
 from .images import (
     find_images, load_image_bytes, guess_mime, autorotate_and_resize,
     to_data_url, file_meta, sha256_bytes, make_messages
 )
 from .writer import Writer
-from .api import call_chat_completions
+from .api import call_chat_completions, is_retryable_error
 from .discovery import VisionModelDiscovery, DEFAULT_VISION_MODEL_HINTS
 
 
@@ -163,11 +164,14 @@ def _process_batch(files: List[Path], args):
             )
             return {"files": files, "metas": metas, "resp": resp, "error": None}
         except Exception as e:
-            if attempt < args.retries:
+            retryable = is_retryable_error(e)
+            if retryable and attempt < args.retries:
                 attempt += 1
                 err(f"Batch error (attempt {attempt}): {e}")
                 backoff_sleep(attempt)
                 continue
+            if not retryable:
+                err(f"Batch failed (not retryable): {e}")
             return {"files": files, "metas": metas, "resp": None, "error": repr(e)}
 
 def main(argv=None):
@@ -182,6 +186,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(
         description="Ultra image processor for LM Studio + Qwen3-VL: fast, parallel, robust."
     )
+    ap.add_argument("--version", action="version", version=f"ultravision {__version__}")
     ap.add_argument("directory", type=Path, help="Directory containing images.")
     ap.add_argument("--model", default="qwen/qwen3-vl-8b", help="LM Studio model id (e.g., qwen/qwen3-vl-8b).")
     ap.add_argument("--api-base", default="http://localhost:1234", help="LM Studio base URL (no /v1).")

@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from .. import __version__
 from ..api import call_chat_completions, extract_text
 from ..discovery import VisionModelDiscovery, DEFAULT_VISION_MODEL_HINTS
 from ..images import file_meta, guess_mime, make_messages, to_data_url
@@ -24,7 +25,7 @@ INDEX_FILE = STATIC_DIR / "index.html"
 app = FastAPI(
     title="UltraVision Studio",
     description="Browser companion for UltraVision with drag-and-drop uploads.",
-    version="0.1.0",
+    version=__version__,
 )
 
 app.add_middleware(

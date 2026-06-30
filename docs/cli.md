@@ -73,7 +73,10 @@ All writers rely on `api.extract_text` to pull the assistant message out of LM S
 ### Logging and failures
 
 - `rich` is optional; if available, it powers spinner/status updates and colored logging via the `info`, `warn`, and `err` helpers.
-- Failed batches (after exhausting retries) are logged to `failures.log` (or the provided `--fail-log`) in JSONL format for replay.
+- Retries are selective: transient failures (connection drops, timeouts, HTTP 408/409/425/429, and 5xx) are retried with exponential backoff up to `--retries`, while deterministic client errors (most 4xx — bad model id, malformed request, auth) fail fast so you don't waste the backoff budget on a request that can never succeed.
+- Failed batches (after exhausting retries, or immediately for non-retryable errors) are logged to `failures.log` (or the provided `--fail-log`) in JSONL format for replay.
+
+Run `ultravision --version` to print the installed package version.
 
 ## Tips for reproducibility
 

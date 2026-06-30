@@ -3,6 +3,37 @@
 import json
 import requests
 
+# Status codes worth retrying: request timeouts, rate limits, and transient
+# server-side failures. Other 4xx responses indicate a client mistake (bad
+# model id, malformed body, missing auth) that will never succeed on retry.
+RETRYABLE_STATUS_CODES = frozenset({408, 409, 425, 429, 500, 502, 503, 504})
+
+
+def is_retryable_error(exc: Exception) -> bool:
+    """Return ``True`` when retrying ``exc`` could plausibly succeed.
+
+    Transient conditions — connection drops, timeouts, rate limits, and 5xx
+    responses — are retryable. Deterministic client errors (most 4xx) and
+    non-network exceptions are not, so callers fail fast instead of wasting
+    the full backoff budget on a request that cannot recover.
+
+    Args:
+        exc (Exception): The exception raised while calling the endpoint.
+
+    Returns:
+        bool: Whether the caller should retry the request.
+    """
+    if isinstance(exc, requests.HTTPError):
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        # No status attached means the failure happened before a response was
+        # parsed; treat it as transient rather than swallowing it silently.
+        return status is None or status in RETRYABLE_STATUS_CODES
+    if isinstance(exc, (requests.Timeout, requests.ConnectionError)):
+        return True
+    # Any other requests-level error (chunked encoding, JSON decode of a bad
+    # gateway page, etc.) is plausibly transient; unrelated exceptions are not.
+    return isinstance(exc, requests.RequestException)
+
 def call_chat_completions(
     api_base: str,
     api_key: str,

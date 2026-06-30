@@ -63,6 +63,31 @@ def test_call_chat_completions_builds_request(monkeypatch):
     assert captured["body"]["top_p"] == 0.9
 
 
+def _http_error(status_code):
+    resp = _FakeResponse(status_code=status_code, reason="x", text="x")
+    return requests.HTTPError("boom", response=resp)
+
+
+@pytest.mark.parametrize("status", [429, 408, 500, 502, 503, 504])
+def test_is_retryable_error_transient_statuses(status):
+    assert api.is_retryable_error(_http_error(status)) is True
+
+
+@pytest.mark.parametrize("status", [400, 401, 403, 404, 422])
+def test_is_retryable_error_client_statuses(status):
+    assert api.is_retryable_error(_http_error(status)) is False
+
+
+def test_is_retryable_error_network_and_unknown():
+    assert api.is_retryable_error(requests.Timeout()) is True
+    assert api.is_retryable_error(requests.ConnectionError()) is True
+    # HTTPError without an attached response is treated as transient.
+    assert api.is_retryable_error(requests.HTTPError("no response")) is True
+    # Non-network programming errors should fail fast, not loop on backoff.
+    assert api.is_retryable_error(ValueError("bug")) is False
+    assert api.is_retryable_error(KeyError("bug")) is False
+
+
 def test_call_chat_completions_raises_on_http_error(monkeypatch):
     def fake_post(url, headers, data, timeout):
         return _FakeResponse(status_code=500, reason="Server Error", text="boom")
