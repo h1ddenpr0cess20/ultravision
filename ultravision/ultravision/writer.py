@@ -13,9 +13,10 @@ class Writer:
     Handles JSONL, JSON, plain text, markdown, and CSV output formats by translating
     the same response payload into the desired layout.
     """
-    def __init__(self, path: Path, fmt: str):
+    def __init__(self, path: Path, fmt: str, append: bool = False):
         self.path = path
         self.fmt = fmt
+        self.append = append
         self._fp = None
         self._accum = []
         self._csv = None
@@ -28,7 +29,11 @@ class Writer:
         """
         self.path.parent.mkdir(parents=True, exist_ok=True)
         if self.fmt in ("jsonl", "text", "markdown", "csv"):
-            self._fp = self.path.open("w", encoding="utf-8", newline="")
+            # Append only makes sense for jsonl (resume). Other formats are not
+            # line-oriented (csv would duplicate its header), so always truncate.
+            write_existing = self.append and self.fmt == "jsonl" and self.path.exists()
+            mode = "a" if write_existing else "w"
+            self._fp = self.path.open(mode, encoding="utf-8", newline="")
             if self.fmt == "csv":
                 self._csv = csv.writer(self._fp)
                 self._csv.writerow(["files", "sha256", "mime", "size_bytes", "width", "height", "text"])

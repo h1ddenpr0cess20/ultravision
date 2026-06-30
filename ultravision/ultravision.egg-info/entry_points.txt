@@ -1,3 +1,0 @@
-[console_scripts]
-ultravision = ultravision.cli:main
-ultravision-web = ultravision.web.server:run

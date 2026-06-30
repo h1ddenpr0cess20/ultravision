@@ -31,6 +31,21 @@ def test_writer_jsonl_and_resume(tmp_path):
     assert resume_hashes == {"abc123"}
 
 
+def test_writer_resume_appends_without_truncating(tmp_path):
+    out = tmp_path / "out.jsonl"
+    with Writer(out, "jsonl") as writer:
+        writer.write_record([Path("first.png")], [{"sha256": "h1"}], sample_response("first"))
+
+    # A resume run must preserve existing records and append new ones.
+    with Writer(out, "jsonl", append=True) as writer:
+        writer.write_record([Path("second.png")], [{"sha256": "h2"}], sample_response("second"))
+
+    lines = out.read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) == 2
+    assert json.loads(lines[0])["text"] == "first"
+    assert json.loads(lines[1])["text"] == "second"
+
+
 def test_writer_text_format(tmp_path):
     out = tmp_path / "out.txt"
     with Writer(out, "text") as writer:

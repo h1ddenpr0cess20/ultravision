@@ -1,1 +1,15 @@
-__pycache__
+__pycache__/
+*.py[cod]
+
+# Build / packaging artifacts
+build/
+dist/
+*.egg-info/
+
+# Virtual environments
+.venv/
+venv/
+
+# Default run outputs
+outputs.*
+failures.log

@@ -263,9 +263,10 @@ def main(argv=None):
         return 0
 
     # Prepare writer & resume filter
-    writer = Writer(Path(args.out), args.format)
+    resuming = args.resume and args.format == "jsonl"
+    writer = Writer(Path(args.out), args.format, append=resuming)
     done_hashes = set()
-    if args.resume and args.format == "jsonl":
+    if resuming:
         done_hashes = writer.already_done_hashes()
         if done_hashes:
             info(f"Resume enabled: {len(done_hashes)} already in {args.out}, will skip duplicates.")
