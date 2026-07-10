@@ -61,8 +61,7 @@ def _run_fetch(payload):
 
 
 def test_fetch_all_models_from_data_key():
-    # With no service type, fall back to listing every /v1/models id (any model),
-    # rather than filtering by name.
+    """Without a service type, every /v1/models id is listed rather than name-filtered."""
     payload = {
         "data": [
             {"id": "qwen/qwen3-vl-8b"},
@@ -83,7 +82,7 @@ def test_fetch_all_models_from_models_key():
 
 
 def test_lmstudio_detects_vision_by_type_not_name():
-    # An arbitrarily-named model is detected purely from type == "vlm".
+    """An arbitrarily-named model is detected purely from type == "vlm"."""
     routes = {
         ("GET", "/api/v0/models"): {
             "data": [
@@ -100,7 +99,7 @@ def test_lmstudio_detects_vision_by_type_not_name():
 
 
 def test_lmstudio_falls_back_to_all_models_without_native_api():
-    # Older LM Studio without /api/v0/models -> list everything from /v1/models.
+    """Older LM Studio without /api/v0/models lists everything from /v1/models."""
     routes = {
         ("GET", "/v1/models"): {"data": [{"id": "anything"}, {"id": "another"}]},
     }
@@ -111,11 +110,11 @@ def test_lmstudio_falls_back_to_all_models_without_native_api():
 
 
 def test_ollama_detects_vision_from_capabilities():
+    """/api/show returns the same payload for both names, so both look vision-capable."""
     routes = {
         ("GET", "/api/tags"): {"models": [{"model": "llava:13b"}, {"model": "mistral:7b"}]},
         ("POST", "/api/show"): {"capabilities": ["completion", "vision"]},
     }
-    # /api/show returns the same payload for both names here, so both look vision-capable.
     discovery = VisionModelDiscovery()
     session = _RouteSession(routes)
     models = asyncio.run(discovery._fetch_models(session, "http://host:11434", "ollama"))
@@ -123,11 +122,10 @@ def test_ollama_detects_vision_from_capabilities():
 
 
 def test_ollama_without_capabilities_lists_all_models():
-    # Old Ollama: /api/show has no capabilities field -> surface every tag rather
-    # than hide the server.
+    """Old Ollama with no capabilities field surfaces every tag rather than hiding the server."""
     routes = {
         ("GET", "/api/tags"): {"models": [{"model": "llava:13b"}, {"model": "qwen2.5vl:7b"}]},
-        ("POST", "/api/show"): {"license": "x"},  # no capabilities key
+        ("POST", "/api/show"): {"license": "x"},
     }
     discovery = VisionModelDiscovery()
     session = _RouteSession(routes)
@@ -136,9 +134,9 @@ def test_ollama_without_capabilities_lists_all_models():
 
 
 def test_address_enumeration_survives_without_psutil(monkeypatch):
-    # A missing/broken psutil must not disable discovery: the primary-IP
-    # fallback should still yield a routable address (with an assumed /24)
-    # so localhost and LAN scanning keep working.
+    """A missing psutil must not disable discovery: the primary-IP fallback still
+    yields a routable address (with an assumed /24), the own address is excluded
+    from the scan, and localhost plus LAN scanning keep working."""
     monkeypatch.setattr(discovery_module, "psutil", None)
     monkeypatch.setattr(VisionModelDiscovery, "_primary_local_ip", staticmethod(lambda: "192.168.1.50"))
 
@@ -150,13 +148,12 @@ def test_address_enumeration_survives_without_psutil(monkeypatch):
     assert {"127.0.0.1", "localhost", "192.168.1.50"} <= local
 
     hosts = discovery._get_network_hosts()
-    assert "192.168.1.1" in hosts  # derived from the /24 around the primary IP
-    assert "192.168.1.50" not in hosts  # own address excluded from the scan
+    assert "192.168.1.1" in hosts
+    assert "192.168.1.50" not in hosts
 
 
 def test_module_imports_when_psutil_missing(monkeypatch):
-    # Importing the module must not hard-depend on psutil being installed.
+    """The module must not hard-depend on psutil being installed."""
     monkeypatch.setattr(discovery_module, "psutil", None)
     discovery = VisionModelDiscovery()
-    # Should not raise even though psutil is unavailable.
     assert isinstance(discovery._get_local_addresses(), set)

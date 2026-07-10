@@ -11,9 +11,9 @@ from typing import Dict, Iterator, List, Optional, Set, Tuple
 
 import aiohttp
 
-try:  # psutil enriches interface discovery but must not be mandatory:
-    import psutil  # a missing/broken psutil should not disable discovery entirely.
-except Exception:  # pragma: no cover - exercised via the no-psutil fallback path
+try:
+    import psutil
+except Exception:
     psutil = None
 
 DEFAULT_VISION_MODEL_HINTS = ("gemma3",)
@@ -32,12 +32,20 @@ class VisionModelDiscovery:
         timeout: float = 2.0,
         additional_vision_models: Optional[List[str]] = None,
     ) -> None:
+        """Configure the discovery service.
+
+        Args:
+            lm_studio_port (int): Port probed for LM Studio servers.
+            ollama_port (int): Port probed for Ollama servers.
+            timeout (float): Total timeout for discovery HTTP calls, in seconds.
+            additional_vision_models (Optional[List[str]]): Extra model-id
+                substrings treated as vision-capable, force-including models a
+                server doesn't advertise. Capability metadata is the primary
+                signal; these are just an override hatch.
+        """
         self.lm_studio_port = lm_studio_port
         self.ollama_port = ollama_port
         self.timeout = timeout
-        # Extra model-id substrings the caller wants treated as vision-capable,
-        # used to force-include models that a server doesn't advertise. Capability
-        # metadata is the primary signal; these are just an override hatch.
         self.additional_vision_models = [h.lower() for h in (additional_vision_models or [])]
         self._running_in_container = self._detect_container_environment()
 
@@ -83,10 +91,6 @@ class VisionModelDiscovery:
                         if addr.netmask:
                             seen_with_mask.add(addr.address)
 
-        # Supply the primary IP with an assumed /24 unless psutil already gave
-        # it to us *with* a netmask — covers a missing psutil and interfaces
-        # reported without a netmask, either of which would otherwise leave the
-        # active subnet unscanned.
         primary = cls._primary_local_ip()
         if primary and primary not in seen_with_mask and not primary.startswith("127."):
             yield primary, "255.255.255.0"
@@ -114,12 +118,12 @@ class VisionModelDiscovery:
         except OSError:
             return gateways
 
-        for line in rows[1:]:  # skip the header row
+        for line in rows[1:]:
             fields = line.split()
             if len(fields) < 3:
                 continue
             destination, gateway_hex = fields[1], fields[2]
-            if destination != "00000000":  # only the default route
+            if destination != "00000000":
                 continue
             try:
                 gateway = socket.inet_ntoa(struct.pack("<L", int(gateway_hex, 16)))
@@ -315,8 +319,6 @@ class VisionModelDiscovery:
                     vision.append(name)
             elif self._name_hinted(name):
                 vision.append(name)
-        # Older Ollama builds expose no capability metadata; surface everything
-        # so the server stays usable instead of vanishing.
         return vision if saw_capabilities else names
 
     async def _discover_localhost(self, session: aiohttp.ClientSession) -> Dict[str, Optional[Dict]]:

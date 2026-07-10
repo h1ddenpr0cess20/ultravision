@@ -28,7 +28,6 @@ def run_concurrently(func, jobs, max_workers: int, on_result):
         return
 
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
-        future_map = {ex.submit(func, *job): job for job in jobs}
-        for fut in as_completed(future_map):
-            res = fut.result()
-            on_result(res)
+        futures = [ex.submit(func, *job) for job in jobs]
+        for fut in as_completed(futures):
+            on_result(fut.result())

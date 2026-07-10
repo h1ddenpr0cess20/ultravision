@@ -130,7 +130,7 @@ async def analyze(
             int(timeout),
             generation_params,
         )
-    except Exception as exc:  # pragma: no cover - network errors
+    except Exception as exc:
         logger.exception("UltraVision inference failed")
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -163,7 +163,7 @@ async def discover_servers(timeout: float = 2.0):
     )
     try:
         return await discovery.discover()
-    except Exception as exc:  # pragma: no cover - network failures
+    except Exception as exc:
         logger.exception("Vision server discovery failed")
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 

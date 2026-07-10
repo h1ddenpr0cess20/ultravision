@@ -43,13 +43,37 @@ def test_file_meta_includes_dimensions(tmp_path, image_factory):
 
 @pytest.mark.skipif(not images._PIL_OK, reason="Pillow is required for this test")
 def test_autorotate_and_resize_resizes_when_needed(tmp_path, image_factory):
-    img_path = image_factory(tmp_path / "big.png", size=(120, 60))
-    resized = images.autorotate_and_resize(img_path, max_side=20)
-    assert resized is not None
+    result = images.autorotate_and_resize(
+        image_factory(tmp_path / "big.png", size=(120, 60)), max_side=20
+    )
+    assert result is not None
+    resized, mime = result
+    assert mime == "image/png"
     from PIL import Image
 
     with Image.open(BytesIO(resized)) as im:
         assert max(im.size) == 20
+
+
+@pytest.mark.skipif(not images._PIL_OK, reason="Pillow is required for this test")
+def test_autorotate_and_resize_reports_converted_mime(tmp_path, image_factory):
+    """A source re-encoded to PNG must report image/png, not its original type."""
+    bmp_path = tmp_path / "pic.bmp"
+    from PIL import Image
+
+    Image.new("RGB", (30, 30), (1, 2, 3)).save(bmp_path, format="BMP")
+    result = images.autorotate_and_resize(bmp_path, max_side=10)
+    assert result is not None
+    data, mime = result
+    assert mime == "image/png"
+    with Image.open(BytesIO(data)) as im:
+        assert im.format == "PNG"
+
+
+def test_find_images_matches_uppercase_extensions(tmp_path, image_factory):
+    img = image_factory(tmp_path / "PHOTO.JPG")
+    found = images.find_images(tmp_path, recursive=False, patterns=None)
+    assert found == [img.resolve()]
 
 
 def test_find_images_handles_patterns_and_recursion(tmp_path, image_factory):

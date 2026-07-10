@@ -32,11 +32,11 @@ def test_writer_jsonl_and_resume(tmp_path):
 
 
 def test_writer_resume_appends_without_truncating(tmp_path):
+    """A resume run must preserve existing records and append new ones."""
     out = tmp_path / "out.jsonl"
     with Writer(out, "jsonl") as writer:
         writer.write_record([Path("first.png")], [{"sha256": "h1"}], sample_response("first"))
 
-    # A resume run must preserve existing records and append new ones.
     with Writer(out, "jsonl", append=True) as writer:
         writer.write_record([Path("second.png")], [{"sha256": "h2"}], sample_response("second"))
 

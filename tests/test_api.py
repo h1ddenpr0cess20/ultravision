@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-
 import pytest
 import requests
 
@@ -35,17 +33,18 @@ class _FakeResponse:
 
 
 def test_call_chat_completions_builds_request(monkeypatch):
+    """A trailing slash is normalized and an empty key falls back to the placeholder."""
     captured = {}
 
-    def fake_post(url, headers, data, timeout):
-        captured.update(url=url, headers=headers, body=json.loads(data), timeout=timeout)
+    def fake_post(url, headers, json, timeout):
+        captured.update(url=url, headers=headers, body=json, timeout=timeout)
         return _FakeResponse(payload={"choices": [{"message": {"content": "ok"}}]})
 
     monkeypatch.setattr(api.requests, "post", fake_post)
 
     resp = api.call_chat_completions(
-        api_base="http://host:1234/",  # trailing slash should be normalized
-        api_key="",  # empty key falls back to the lm-studio placeholder
+        api_base="http://host:1234/",
+        api_key="",
         model="qwen/qwen3-vl-8b",
         messages=[{"role": "user", "content": "hi"}],
         temperature=0.2,
@@ -79,17 +78,16 @@ def test_is_retryable_error_client_statuses(status):
 
 
 def test_is_retryable_error_network_and_unknown():
+    """An HTTPError without a response is transient; programming errors fail fast."""
     assert api.is_retryable_error(requests.Timeout()) is True
     assert api.is_retryable_error(requests.ConnectionError()) is True
-    # HTTPError without an attached response is treated as transient.
     assert api.is_retryable_error(requests.HTTPError("no response")) is True
-    # Non-network programming errors should fail fast, not loop on backoff.
     assert api.is_retryable_error(ValueError("bug")) is False
     assert api.is_retryable_error(KeyError("bug")) is False
 
 
 def test_call_chat_completions_raises_on_http_error(monkeypatch):
-    def fake_post(url, headers, data, timeout):
+    def fake_post(url, headers, json, timeout):
         return _FakeResponse(status_code=500, reason="Server Error", text="boom")
 
     monkeypatch.setattr(api.requests, "post", fake_post)

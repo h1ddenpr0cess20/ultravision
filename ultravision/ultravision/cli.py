@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+import json
 from contextlib import nullcontext
 from pathlib import Path
 from typing import List
@@ -49,7 +50,7 @@ def _await_async(fn):
     except RuntimeError:
         loop = None
 
-    if loop and loop.is_running():  # pragma: no cover - rare in CLI contexts
+    if loop and loop.is_running():
         temp_loop = asyncio.new_event_loop()
         try:
             return temp_loop.run_until_complete(fn())
@@ -92,7 +93,7 @@ def _auto_configure_target(args):
     info("🔍 Auto-discovering LM Studio/Ollama servers...")
     try:
         results = _await_async(discovery.discover)
-    except Exception as exc:  # pragma: no cover - network failures
+    except Exception as exc:
         err(f"Discovery failed: {exc}")
         return None
 
@@ -130,10 +131,10 @@ def _prepare_batch(files: List[Path], args):
         raw = load_image_bytes(p)
         mime = guess_mime(p)
         if args.autorotate or args.max_side:
-            maybe = autorotate_and_resize(p, args.max_side)
-            if maybe:
-                raw = maybe
-        metas.append(file_meta(p, raw))
+            processed = autorotate_and_resize(p, args.max_side)
+            if processed:
+                raw, mime = processed
+        metas.append(file_meta(p, raw, mime))
         data_urls.append(to_data_url(mime, raw))
     messages = make_messages(args.system_prompt, args.prompt, data_urls)
     return messages, metas
@@ -234,10 +235,8 @@ def main(argv=None):
         ext = OUT_EXT_BY_FORMAT.get(args.format, args.format)
         args.out = f"{DEFAULT_OUT_NAME}.{ext}"
 
-    # Parse extras
     args.extra_dict = None
     if args.extra:
-        import json
         try:
             args.extra_dict = json.loads(args.extra)
             if not isinstance(args.extra_dict, dict):
@@ -254,20 +253,18 @@ def main(argv=None):
         args.api_base = target["api_base"]
         args.model = target["model"]
 
-    # Collect files
     root = args.directory
     if not root.exists() or not root.is_dir():
         err(f"{root} is not a directory.")
         return 2
 
     all_images = find_images(root, args.recursive, args.patterns)
-    if args.limit:
+    if args.limit is not None and args.limit >= 0:
         all_images = all_images[:args.limit]
     if not all_images:
         warn("No matching images found.")
         return 0
 
-    # Prepare writer & resume filter
     resuming = args.resume and args.format == "jsonl"
     writer = Writer(Path(args.out), args.format, append=resuming)
     done_hashes = set()
@@ -277,7 +274,6 @@ def main(argv=None):
             info(f"Resume enabled: {len(done_hashes)} already in {args.out}, will skip duplicates.")
 
     with writer:
-        # Build batches with dedup by file content
         batches = []
         seen_hashes = set(done_hashes)
         chunk = []
@@ -297,7 +293,6 @@ def main(argv=None):
         if chunk:
             batches.append(chunk)
 
-        # Progress spinner (falls back to no spinner if rich is unavailable)
         total_batches = len(batches)
         processed_batches = 0
         fails = []
@@ -306,7 +301,6 @@ def main(argv=None):
         ) if HAVE_RICH and total_batches else nullcontext()
 
         with status_cm as status:
-            # Run concurrently
             def on_result(res):
                 nonlocal processed_batches
                 if res["error"] or res["resp"] is None:
@@ -329,9 +323,8 @@ def main(argv=None):
         if fails:
             fail_path = Path(args.fail_log)
             with fail_path.open("w", encoding="utf-8") as f:
-                import json as _json
                 for rec in fails:
-                    f.write(_json.dumps(rec, ensure_ascii=False) + "\n")
+                    f.write(json.dumps(rec, ensure_ascii=False) + "\n")
             warn(f"{len(fails)} batch(es) failed. See {fail_path}")
 
     info(f"✅ Done. Results → {args.out} ({args.format})")

@@ -9,6 +9,7 @@ from ultravision import cli
 
 
 def test_cli_processes_images_and_deduplicates(tmp_path, image_factory, monkeypatch):
+    """The duplicate third image is skipped, so only two calls are made."""
     images_dir = tmp_path / "imgs"
     images_dir.mkdir()
     img_a = image_factory(images_dir / "a.png")
@@ -37,7 +38,7 @@ def test_cli_processes_images_and_deduplicates(tmp_path, image_factory, monkeypa
         ]
     )
     assert rc == 0
-    assert len(calls) == 2  # third image is a duplicate and skipped
+    assert len(calls) == 2
 
     lines = [line for line in out_path.read_text(encoding="utf-8").splitlines() if line.strip()]
     assert len(lines) == 2
@@ -47,6 +48,9 @@ def test_cli_processes_images_and_deduplicates(tmp_path, image_factory, monkeypa
 
 
 def test_cli_resume_preserves_existing_and_skips_done(tmp_path, image_factory, monkeypatch):
+    """After a first pass, a resumed run with a new image must skip the already
+    processed one and preserve its record: the writer must not truncate the
+    existing output, and only the new image triggers a call."""
     images_dir = tmp_path / "imgs"
     images_dir.mkdir()
     image_factory(images_dir / "a.png")
@@ -62,18 +66,15 @@ def test_cli_resume_preserves_existing_and_skips_done(tmp_path, image_factory, m
 
     base_args = [str(images_dir), "--out", str(out_path), "--concurrency", "1"]
 
-    # First pass processes the single image.
     assert cli.main(base_args) == 0
     assert len(calls) == 1
 
-    # Add a second image, then resume: the first must be skipped and its record
-    # preserved (the writer must not truncate the existing output).
     image_factory(images_dir / "b.png", size=(16, 16))
     assert cli.main(base_args + ["--resume"]) == 0
-    assert len(calls) == 2  # only the new image triggered a call
+    assert len(calls) == 2
 
     lines = [line for line in out_path.read_text(encoding="utf-8").splitlines() if line.strip()]
-    assert len(lines) == 2  # original record survived alongside the new one
+    assert len(lines) == 2
 
 
 def test_cli_rejects_invalid_extra(tmp_path):
@@ -82,6 +83,8 @@ def test_cli_rejects_invalid_extra(tmp_path):
 
 
 def test_cli_fails_fast_on_non_retryable_error(tmp_path, image_factory, monkeypatch):
+    """A 400 is not retried despite --retries 5: the run completes with the batch
+    logged as a failure and no backoff spent."""
     images_dir = tmp_path / "imgs"
     images_dir.mkdir()
     image_factory(images_dir / "a.png")
@@ -114,12 +117,13 @@ def test_cli_fails_fast_on_non_retryable_error(tmp_path, image_factory, monkeypa
         ]
     )
 
-    assert rc == 0  # run completes; the batch is logged as a failure
-    assert len(attempts) == 1  # a 400 is not retried despite --retries 5
-    assert slept == []  # and no backoff was spent
+    assert rc == 0
+    assert len(attempts) == 1
+    assert slept == []
 
 
 def test_cli_retries_transient_error(tmp_path, image_factory, monkeypatch):
+    """A 503 fails once, is retried, and then succeeds."""
     images_dir = tmp_path / "imgs"
     images_dir.mkdir()
     image_factory(images_dir / "a.png")
@@ -144,7 +148,7 @@ def test_cli_retries_transient_error(tmp_path, image_factory, monkeypatch):
     )
 
     assert rc == 0
-    assert attempts["n"] == 2  # failed once, retried, then succeeded
+    assert attempts["n"] == 2
     lines = [ln for ln in out_path.read_text(encoding="utf-8").splitlines() if ln.strip()]
     assert json.loads(lines[0])["text"] == "recovered"
 

@@ -38,8 +38,6 @@ class Writer:
         """
         self.path.parent.mkdir(parents=True, exist_ok=True)
         if self.fmt in ("jsonl", "text", "markdown", "csv"):
-            # Append only makes sense for jsonl (resume). Other formats are not
-            # line-oriented (csv would duplicate its header), so always truncate.
             write_existing = self.append and self.fmt == "jsonl" and self.path.exists()
             mode = "a" if write_existing else "w"
             self._fp = self.path.open(mode, encoding="utf-8", newline="")
@@ -77,7 +75,7 @@ class Writer:
                 m0.get("height", ""),
                 text.replace("\n", " ").strip(),
             ])
-        else:  # json
+        else:
             self._accum.append(record)
 
     def already_done_hashes(self) -> set:

@@ -17,7 +17,6 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh \
     && pip install --no-cache-dir . \
     && rm -rf /root/.cache
 
-# The web companion (`docker run <image> web`) listens here by default.
 EXPOSE 8000
 
 ENTRYPOINT ["docker-entrypoint.sh"]

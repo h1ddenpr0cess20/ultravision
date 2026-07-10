@@ -15,13 +15,13 @@ def test_web_main_parses_args(monkeypatch):
 
 
 def test_web_main_defaults_are_production_safe(monkeypatch):
+    """Reload must default off so the shipped console script / container does not
+    start uvicorn's dev file-watcher."""
     captured = {}
     monkeypatch.setattr(server, "run", lambda **kwargs: captured.update(kwargs))
 
     server.main([])
 
-    # Reload must default off so the shipped console script / container does not
-    # start uvicorn's dev file-watcher.
     assert captured == {"host": "0.0.0.0", "port": 8000, "reload": False}
 
 

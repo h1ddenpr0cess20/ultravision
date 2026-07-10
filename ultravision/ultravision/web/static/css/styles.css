@@ -39,7 +39,6 @@ body {
   background: var(--bg);
 }
 
-/* Themed scrollbars for scrollable panels */
 * {
   scrollbar-width: thin;
   scrollbar-color: var(--accent-bright) var(--bg-alt);
