@@ -5,11 +5,16 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import os
-import re
-from typing import Dict, List, Optional, Set, Tuple
+import socket
+import struct
+from typing import Dict, Iterator, List, Optional, Set, Tuple
 
 import aiohttp
-import netifaces
+
+try:
+    import psutil
+except Exception:
+    psutil = None
 
 DEFAULT_VISION_MODEL_HINTS = ("gemma3",)
 DOCKER_HOST_ALIASES = ("host.docker.internal",)
@@ -27,44 +32,105 @@ class VisionModelDiscovery:
         timeout: float = 2.0,
         additional_vision_models: Optional[List[str]] = None,
     ) -> None:
+        """Configure the discovery service.
+
+        Args:
+            lm_studio_port (int): Port probed for LM Studio servers.
+            ollama_port (int): Port probed for Ollama servers.
+            timeout (float): Total timeout for discovery HTTP calls, in seconds.
+            additional_vision_models (Optional[List[str]]): Extra model-id
+                substrings treated as vision-capable, force-including models a
+                server doesn't advertise. Capability metadata is the primary
+                signal; these are just an override hatch.
+        """
         self.lm_studio_port = lm_studio_port
         self.ollama_port = ollama_port
         self.timeout = timeout
-        self.additional_vision_models = additional_vision_models or []
-        self.qwen_patterns = [
-            re.compile(r"qwen\d+(\.\d+)?-?vl", re.IGNORECASE),
-            re.compile(r"qwen/qwen\d+(\.\d+)?-?vl", re.IGNORECASE),
-        ]
+        self.additional_vision_models = [h.lower() for h in (additional_vision_models or [])]
         self._running_in_container = self._detect_container_environment()
+
+    @staticmethod
+    def _primary_local_ip() -> Optional[str]:
+        """Best-effort primary IPv4 address via the outbound-socket trick.
+
+        Opens a UDP socket toward a public address (no packets are actually
+        sent) and reads back the local address the OS would route through.
+        Works on every platform without psutil/netifaces, so LAN discovery
+        keeps functioning even when richer enumeration is unavailable.
+        """
+
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            sock.connect(("8.8.8.8", 80))
+            return sock.getsockname()[0]
+        except OSError:
+            return None
+        finally:
+            sock.close()
+
+    @classmethod
+    def _iter_inet_addresses(cls) -> Iterator[Tuple[str, Optional[str]]]:
+        """Yield ``(ip, netmask)`` for every usable IPv4 address on the host.
+
+        Uses psutil for full per-interface detail when it is importable, and
+        always includes the primary outbound IP (assuming a ``/24`` subnet) so
+        discovery still scans the local network when psutil is missing or
+        returns nothing useful.
+        """
+
+        seen_with_mask: Set[str] = set()
+        if psutil is not None:
+            try:
+                interfaces = psutil.net_if_addrs()
+            except Exception:
+                interfaces = {}
+            for addrs in interfaces.values():
+                for addr in addrs:
+                    if addr.family == socket.AF_INET and addr.address:
+                        yield addr.address, addr.netmask
+                        if addr.netmask:
+                            seen_with_mask.add(addr.address)
+
+        primary = cls._primary_local_ip()
+        if primary and primary not in seen_with_mask and not primary.startswith("127."):
+            yield primary, "255.255.255.0"
 
     def _get_local_addresses(self) -> Set[str]:
         """Return localhost aliases and interface IPs."""
 
         local_ips = {"127.0.0.1", "localhost"}
-        for interface in netifaces.interfaces():
-            addrs = netifaces.ifaddresses(interface)
-            if netifaces.AF_INET in addrs:
-                for addr in addrs[netifaces.AF_INET]:
-                    ip = addr.get("addr")
-                    if ip:
-                        local_ips.add(ip)
+        for ip, _netmask in self._iter_inet_addresses():
+            local_ips.add(ip)
         return local_ips
 
     def _get_default_gateways(self) -> Set[str]:
-        """Return IPv4 gateway addresses (often the Docker host from containers)."""
+        """Return IPv4 gateway addresses (often the Docker host from containers).
+
+        psutil does not expose routing information, so we parse Linux's
+        ``/proc/net/route`` directly. On platforms without it (or when the file
+        cannot be read) we simply return no gateways.
+        """
 
         gateways: Set[str] = set()
         try:
-            gateway_info = netifaces.gateways()
-        except Exception:
+            with open("/proc/net/route", "rt", encoding="utf-8") as handle:
+                rows = handle.readlines()
+        except OSError:
             return gateways
 
-        default_entries = gateway_info.get("default", {})
-        ipv4_default = default_entries.get(netifaces.AF_INET)
-        if ipv4_default:
-            gateway = ipv4_default[0] if isinstance(ipv4_default, (list, tuple)) else ipv4_default
-            if gateway:
-                gateways.add(str(gateway))
+        for line in rows[1:]:
+            fields = line.split()
+            if len(fields) < 3:
+                continue
+            destination, gateway_hex = fields[1], fields[2]
+            if destination != "00000000":
+                continue
+            try:
+                gateway = socket.inet_ntoa(struct.pack("<L", int(gateway_hex, 16)))
+            except (ValueError, struct.error, OSError):
+                continue
+            if gateway and gateway != "0.0.0.0":
+                gateways.add(gateway)
 
         return gateways
 
@@ -74,49 +140,36 @@ class VisionModelDiscovery:
         local_ips = self._get_local_addresses()
         potential_hosts: Set[str] = set()
         gateway_hosts = self._get_default_gateways()
-        for interface in netifaces.interfaces():
-            addrs = netifaces.ifaddresses(interface)
-            if netifaces.AF_INET not in addrs:
+        for ip, netmask in self._iter_inet_addresses():
+            if not ip or not netmask or ip.startswith("127."):
                 continue
-            for addr in addrs[netifaces.AF_INET]:
-                ip = addr.get("addr")
-                netmask = addr.get("netmask")
-                if not ip or not netmask or ip.startswith("127."):
-                    continue
-                try:
-                    network = ipaddress.IPv4Network(f"{ip}/{netmask}", strict=False)
-                except Exception:
-                    continue
-                host_limit = (
-                    MAX_NETWORK_SCAN_HOSTS if network.num_addresses > MAX_NETWORK_SCAN_HOSTS + 2 else None
-                )
-                count = 0
-                try:
-                    for host in network.hosts():
-                        host_str = str(host)
-                        if host_str in local_ips:
-                            continue
-                        potential_hosts.add(host_str)
-                        count += 1
-                        if host_limit is not None and count >= host_limit:
-                            break
-                except Exception:
-                    continue
+            try:
+                network = ipaddress.IPv4Network(f"{ip}/{netmask}", strict=False)
+            except Exception:
+                continue
+            host_limit = (
+                MAX_NETWORK_SCAN_HOSTS if network.num_addresses > MAX_NETWORK_SCAN_HOSTS + 2 else None
+            )
+            count = 0
+            try:
+                for host in network.hosts():
+                    host_str = str(host)
+                    if host_str in local_ips:
+                        continue
+                    potential_hosts.add(host_str)
+                    count += 1
+                    if host_limit is not None and count >= host_limit:
+                        break
+            except Exception:
+                continue
         potential_hosts.update(gateway_hosts - local_ips)
         return potential_hosts
 
-    def _is_vision_model(self, model_name: str) -> bool:
-        """Return ``True`` when the model id looks like a multimodal/vision model."""
+    def _name_hinted(self, model_id: str) -> bool:
+        """Return ``True`` if the id matches a caller-supplied vision hint."""
 
-        for pattern in self.qwen_patterns:
-            if pattern.search(model_name):
-                return True
-
-        model_lower = model_name.lower()
-        for needle in self.additional_vision_models:
-            if needle.lower() in model_lower:
-                return True
-        return False
+        lowered = model_id.lower()
+        return any(needle in lowered for needle in self.additional_vision_models)
 
     async def _check_port(self, host: str, port: int) -> bool:
         """Quick async port probe."""
@@ -134,28 +187,139 @@ class VisionModelDiscovery:
         except Exception:
             return False
 
-    async def _fetch_models(self, session: aiohttp.ClientSession, base_url: str) -> List[str]:
-        """Return the filtered models from a `/v1/models` endpoint."""
+    async def _get_json(
+        self,
+        session: aiohttp.ClientSession,
+        url: str,
+        *,
+        method: str = "GET",
+        payload: Optional[Dict] = None,
+    ) -> Optional[Dict]:
+        """GET/POST ``url`` and return parsed JSON, or ``None`` on any failure."""
 
         try:
             timeout = aiohttp.ClientTimeout(total=self.timeout, connect=0.5)
-            async with session.get(f"{base_url}/v1/models", timeout=timeout) as response:
+            if method == "POST":
+                ctx = session.post(url, json=payload, timeout=timeout)
+            else:
+                ctx = session.get(url, timeout=timeout)
+            async with ctx as response:
                 if response.status != 200:
-                    return []
-                payload = await response.json()
+                    return None
+                return await response.json()
         except Exception:
-            return []
+            return None
 
+    async def _fetch_models(
+        self,
+        session: aiohttp.ClientSession,
+        base_url: str,
+        service_type: Optional[str] = None,
+    ) -> List[str]:
+        """Return the candidate model ids for a reachable server.
+
+        Vision capability is read from provider metadata so *any* vision model is
+        detected regardless of its name: LM Studio's native ``/api/v0/models``
+        exposes a ``type`` of ``vlm``, and Ollama's ``/api/show`` reports a
+        ``capabilities`` list containing ``vision``. When that metadata is
+        unavailable (older servers, plain OpenAI-compatible backends) we list
+        every model from ``/v1/models`` rather than hide the server.
+        """
+
+        if service_type == "lm_studio":
+            vlms = await self._fetch_lmstudio_vlms(session, base_url)
+            if vlms is not None:
+                return vlms
+        elif service_type == "ollama":
+            vision = await self._fetch_ollama_vision(session, base_url)
+            if vision is not None:
+                return vision
+        return await self._fetch_all_models(session, base_url)
+
+    async def _fetch_all_models(self, session: aiohttp.ClientSession, base_url: str) -> List[str]:
+        """List every model id from the OpenAI-compatible ``/v1/models`` endpoint."""
+
+        payload = await self._get_json(session, f"{base_url}/v1/models")
+        if not payload:
+            return []
         entries = payload.get("data") or payload.get("models")
         if not isinstance(entries, list):
-            entries = []
+            return []
+        return [row.get("id", "") for row in entries if isinstance(row, dict) and row.get("id")]
 
-        vision_models: List[str] = []
+    async def _fetch_lmstudio_vlms(
+        self, session: aiohttp.ClientSession, base_url: str
+    ) -> Optional[List[str]]:
+        """Vision models from LM Studio's native API (``type == 'vlm'``).
+
+        Returns ``None`` when the native endpoint is unavailable so the caller
+        falls back to listing all models.
+        """
+
+        payload = await self._get_json(session, f"{base_url}/api/v0/models")
+        if not payload:
+            return None
+        entries = payload.get("data") or payload.get("models")
+        if not isinstance(entries, list):
+            return None
+        models = []
         for row in entries:
+            if not isinstance(row, dict):
+                continue
             model_id = row.get("id", "")
-            if model_id and self._is_vision_model(model_id):
-                vision_models.append(model_id)
-        return vision_models
+            if not model_id:
+                continue
+            if str(row.get("type", "")).lower() == "vlm" or self._name_hinted(model_id):
+                models.append(model_id)
+        return models
+
+    async def _fetch_ollama_vision(
+        self, session: aiohttp.ClientSession, base_url: str
+    ) -> Optional[List[str]]:
+        """Vision models from Ollama via ``/api/tags`` + ``/api/show`` capabilities.
+
+        Returns ``None`` when ``/api/tags`` is unavailable. If the server is too
+        old to report capabilities at all, every tag is returned rather than
+        dropping the server.
+        """
+
+        tags = await self._get_json(session, f"{base_url}/api/tags")
+        if not tags:
+            return None
+        rows = tags.get("models")
+        if not isinstance(rows, list):
+            return None
+        names = [
+            (row.get("model") or row.get("name"))
+            for row in rows
+            if isinstance(row, dict) and (row.get("model") or row.get("name"))
+        ]
+        if not names:
+            return []
+
+        async def _capabilities(name: str) -> Tuple[str, Optional[List[str]]]:
+            info = await self._get_json(
+                session, f"{base_url}/api/show", method="POST", payload={"model": name}
+            )
+            caps = (info or {}).get("capabilities")
+            return name, caps if isinstance(caps, list) else None
+
+        results = await asyncio.gather(
+            *(_capabilities(name) for name in names), return_exceptions=True
+        )
+        vision: List[str] = []
+        saw_capabilities = False
+        for result in results:
+            if not isinstance(result, tuple):
+                continue
+            name, caps = result
+            if caps is not None:
+                saw_capabilities = True
+                if "vision" in caps or self._name_hinted(name):
+                    vision.append(name)
+            elif self._name_hinted(name):
+                vision.append(name)
+        return vision if saw_capabilities else names
 
     async def _discover_localhost(self, session: aiohttp.ClientSession) -> Dict[str, Optional[Dict]]:
         """Return ``lm_studio`` / ``ollama`` entries found on localhost."""
@@ -164,7 +328,9 @@ class VisionModelDiscovery:
         results: Dict[str, Optional[Dict]] = {"lm_studio": None, "ollama": None}
 
         if await self._check_port("127.0.0.1", self.lm_studio_port):
-            models = await self._fetch_models(session, f"http://127.0.0.1:{self.lm_studio_port}")
+            models = await self._fetch_models(
+                session, f"http://127.0.0.1:{self.lm_studio_port}", "lm_studio"
+            )
             if models:
                 results["lm_studio"] = {
                     "server_address": f"http://127.0.0.1:{self.lm_studio_port}",
@@ -175,7 +341,9 @@ class VisionModelDiscovery:
                 }
 
         if await self._check_port("127.0.0.1", self.ollama_port):
-            models = await self._fetch_models(session, f"http://127.0.0.1:{self.ollama_port}")
+            models = await self._fetch_models(
+                session, f"http://127.0.0.1:{self.ollama_port}", "ollama"
+            )
             if models:
                 results["ollama"] = {
                     "server_address": f"http://127.0.0.1:{self.ollama_port}",
@@ -248,7 +416,7 @@ class VisionModelDiscovery:
     ) -> Tuple[str, Optional[Dict]]:
         """Return structured info for a reachable server."""
 
-        models = await self._fetch_models(session, url)
+        models = await self._fetch_models(session, url, service_type)
         if models:
             return (
                 service_type,
@@ -314,28 +482,6 @@ class VisionModelDiscovery:
         results["lm_studio"].extend(network_results["lm_studio"])
         results["ollama"].extend(network_results["ollama"])
         return results
-
-    async def discover_lm_studio(self) -> List[Dict]:
-        """Return only LM Studio hosts."""
-
-        old_port = self.ollama_port
-        self.ollama_port = 0
-        try:
-            results = await self.discover()
-        finally:
-            self.ollama_port = old_port
-        return results["lm_studio"]
-
-    async def discover_ollama(self) -> List[Dict]:
-        """Return only Ollama hosts."""
-
-        old_port = self.lm_studio_port
-        self.lm_studio_port = 0
-        try:
-            results = await self.discover()
-        finally:
-            self.lm_studio_port = old_port
-        return results["ollama"]
 
 
 __all__ = ["VisionModelDiscovery", "DEFAULT_VISION_MODEL_HINTS"]

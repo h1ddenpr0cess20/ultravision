@@ -798,9 +798,7 @@ async function submitForm(event) {
       try {
         const text = await response.text();
         message = text || message;
-      } catch {
-        // ignore
-      }
+      } catch {}
       showToast(`Server error: ${message}`, "error");
       statusLine.textContent = "Request failed - adjust settings and retry.";
       return;

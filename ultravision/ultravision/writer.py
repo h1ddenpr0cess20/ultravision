@@ -13,9 +13,19 @@ class Writer:
     Handles JSONL, JSON, plain text, markdown, and CSV output formats by translating
     the same response payload into the desired layout.
     """
-    def __init__(self, path: Path, fmt: str):
+    def __init__(self, path: Path, fmt: str, append: bool = False):
+        """Configure the writer.
+
+        Args:
+            path (Path): Destination file path.
+            fmt (str): Output format (``jsonl``, ``json``, ``text``, ``markdown``, or ``csv``).
+            append (bool): When ``True`` and ``fmt`` is ``jsonl``, append to an
+                existing file (used for ``--resume``) instead of truncating it.
+                Ignored for non-jsonl formats, which are not line-oriented.
+        """
         self.path = path
         self.fmt = fmt
+        self.append = append
         self._fp = None
         self._accum = []
         self._csv = None
@@ -28,7 +38,9 @@ class Writer:
         """
         self.path.parent.mkdir(parents=True, exist_ok=True)
         if self.fmt in ("jsonl", "text", "markdown", "csv"):
-            self._fp = self.path.open("w", encoding="utf-8", newline="")
+            write_existing = self.append and self.fmt == "jsonl" and self.path.exists()
+            mode = "a" if write_existing else "w"
+            self._fp = self.path.open(mode, encoding="utf-8", newline="")
             if self.fmt == "csv":
                 self._csv = csv.writer(self._fp)
                 self._csv.writerow(["files", "sha256", "mime", "size_bytes", "width", "height", "text"])
@@ -49,7 +61,7 @@ class Writer:
         elif self.fmt == "text":
             self._fp.write(f"# {', '.join(record['files'])}\n{text}\n\n")
         elif self.fmt == "markdown":
-            self._fp.write(f"### Files\n- " + "\n- ".join(record["files"]) + "\n\n")
+            self._fp.write("### Files\n- " + "\n- ".join(record["files"]) + "\n\n")
             self._fp.write("### Output\n")
             self._fp.write(text.strip() + "\n\n---\n\n")
         elif self.fmt == "csv":
@@ -63,7 +75,7 @@ class Writer:
                 m0.get("height", ""),
                 text.replace("\n", " ").strip(),
             ])
-        else:  # json
+        else:
             self._accum.append(record)
 
     def already_done_hashes(self) -> set:

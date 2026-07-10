@@ -6,6 +6,7 @@ from ultravision import util
 
 
 def test_backoff_sleep_respects_cap(monkeypatch):
+    """The first sleep is base ** attempt; the second is capped at 5 rather than 32."""
     calls = []
 
     def fake_sleep(duration):
@@ -14,8 +15,8 @@ def test_backoff_sleep_respects_cap(monkeypatch):
     monkeypatch.setattr(util.time, "sleep", fake_sleep)
     util.backoff_sleep(attempt=1, base=2, cap=10)
     util.backoff_sleep(attempt=5, base=2, cap=5)
-    assert calls[0] == 2  # 2 ** 1
-    assert calls[1] == 5  # capped at 5 rather than 32
+    assert calls[0] == 2
+    assert calls[1] == 5
 
 
 def test_run_concurrently_serial_mode():

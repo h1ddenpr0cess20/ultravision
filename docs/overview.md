@@ -14,7 +14,7 @@ UltraVision is a fast, resilient batch image processor that pairs with LM Studio
 ## Architecture
 
 1. **CLI runner (`ultravision.cli`):** Orchestrates argument parsing, file discovery, batching, retries, writer management, and logging with optional `rich` integration.
-2. **Discovery (`ultravision.discovery`):** `VisionModelDiscovery` scans localhost, Docker gateways, and LAN ranges for LM Studio/Ollama `/v1/models`, filters for vision-compatible IDs, and surfaces local URLs for both CLI and web auto-configuration.
+2. **Discovery (`ultravision.discovery`):** `VisionModelDiscovery` scans localhost, Docker gateways, and LAN ranges for LM Studio/Ollama servers, identifies vision models from provider capability metadata (LM Studio `/api/v0/models` `type=="vlm"`, Ollama `/api/show` `capabilities`), and surfaces local URLs for both CLI and web auto-configuration. Servers without capability metadata fall back to listing all `/v1/models` so they are never hidden.
 3. **Image helpers (`ultravision.images`):** Guess MIME types, read bytes, handle optional Pillow-based rotations/resizes, create metadata, and build LM Studio chat messages.
 4. **Client writers (`ultravision.writer`):** Serialize outputs into the requested format and support resume awareness through JSONL introspection.
 5. **API helpers (`ultravision.api`):** Send chat completions to LM Studio/OpenAI endpoints and normalize response text.

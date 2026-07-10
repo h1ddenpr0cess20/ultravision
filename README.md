@@ -20,13 +20,13 @@ UltraVision is a fast, resilient batch image processor that pairs LM Studio, Oll
 
 1. **Install the package**
    ```bash
-   pip install .
+   pip install ./ultravision
    ```
-   (Or build a wheel via `python -m build` and `pip install ./dist/ultravision-*.whl`.)
+   (Or build a wheel via `python -m build ./ultravision` and `pip install ./ultravision/dist/ultravision-*.whl`.)
 
    For development:
    ```bash
-   pip install -e ".[dev]"
+   pip install -e "./ultravision[dev]"
    ```
 
 2. **Start LM Studio or Ollama**
@@ -84,7 +84,7 @@ Run `ultravision --help` to explore every flag documented in `docs/cli.md`.
 FastAPI backs the browser UI:
 
 ```bash
-pip install .
+pip install ./ultravision
 uvicorn ultravision.web.server:app --reload
 ```
 
@@ -130,11 +130,10 @@ docker run --rm -it -p 8000:8000 \
   ultravision \
   web \
   --host 0.0.0.0 \
-  --port 8000 \
-  --api-base http://host.docker.internal:1234
+  --port 8000
 ```
 
-The browser UI will be reachable at [http://localhost:8000](http://localhost:8000) and still points to the same LM Studio endpoint you provide via `--api-base / --api-key`.
+The browser UI will be reachable at [http://localhost:8000](http://localhost:8000). Unlike the CLI, the web companion takes the LM Studio endpoint, API key, and model from the **Studio settings in the browser** (read per request), not from launch flags — `ultravision-web` only accepts `--host`, `--port`, and `--reload`. The `--add-host` flag is what lets a value like `http://host.docker.internal:1234`, entered in the UI, resolve from inside the container. Auto-reload stays off by default; add `--reload` only for local development.
 
 ## Documentation
 
@@ -153,11 +152,11 @@ The browser UI will be reachable at [http://localhost:8000](http://localhost:800
 ## Testing
 
 ```bash
-pip install -e ".[dev]"
+pip install -e "./ultravision[dev]"
 pytest
 ```
 
-The suite covers image helpers, writer formats/resume behavior, CLI batching/dedup logic, and utility helpers like backoff/thread pools.
+The suite covers the API client, image helpers, writer formats/resume behavior, CLI batching/dedup/resume logic, and utility helpers like backoff/thread pools.
 
 ## License
 

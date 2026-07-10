@@ -7,11 +7,13 @@ The FastAPI-based web companion mirrors the CLI experience with a browsable drag
 Ensure you have FastAPI/uvicorn installed and either your LM Studio (default `1234`) or Ollama (`11434`) server running:
 
 ```bash
-pip install .
-uvicorn ultravision.web.server:app --reload
+pip install ./ultravision
+ultravision-web --host 0.0.0.0 --port 8000
 ```
 
-Then point your browser to [http://localhost:8000](http://localhost:8000). The static assets (React-like single-page app shipped under `ultravision/web/static`) handle the UI.
+`ultravision-web` accepts `--host`, `--port`, and `--reload`. Auto-reload is **off by default** (it is a development-only feature that spawns a file watcher and pulls in `watchfiles`); pass `--reload` only when iterating locally. For ad-hoc development you can also run uvicorn directly: `uvicorn ultravision.web.server:app --reload`.
+
+Then point your browser to [http://localhost:8000](http://localhost:8000). The static assets (single-page app shipped under `ultravision/web/static`) handle the UI.
 
 ### Connecting to LM Studio or Ollama
 
@@ -49,7 +51,7 @@ Accepts multipart uploads and proxies them through LM Studio.
 Returns the discovery payload that the CLI and Studio UI share when locating LM Studio/Ollama vision servers.
 
 - **Behavior:**
-  1. Runs `VisionModelDiscovery`, which probes the default hosts (local loopback, Docker gateways, and LAN ranges) on the LM Studio and Ollama ports, fetches `/v1/models`, and filters for vision-capable IDs (e.g., `qwen*vl` plus any hints such as `gemma3`).
+  1. Runs `VisionModelDiscovery`, which probes the default hosts (local loopback, Docker gateways, and LAN ranges) on the LM Studio and Ollama ports and identifies vision models from each provider's capability metadata — LM Studio's native `/api/v0/models` (`type == "vlm"`) and Ollama's `/api/show` (`capabilities` containing `vision`). Any vision model is detected regardless of its name; servers that don't expose capability metadata fall back to listing every `/v1/models` entry so they are never hidden.
   2. Reports each service (`lm_studio`, `ollama`) with a `server_address`, optional `local_addresses`, and the discovered `vision_models`.
   3. Honors the `timeout` query parameter (default `2.0` seconds) and raises `HTTP 502` if an unexpected error occurs while probing.
 
@@ -59,4 +61,5 @@ The UltraVision Studio frontend calls this endpoint on load (and whenever you hi
 
 - The server adds CORS middleware that allows all origins for convenience; tighten it if embedding UltraVision in trusted environments.
 - The static assets are served from `ultravision/web/static`. Rebuilding the frontend must place `index.html` and friends under this directory before shipping.
-- Use `uvicorn --reload` during development so code changes automatically take effect.
+- Pass `ultravision-web --reload` (or run `uvicorn --reload`) during development so code changes take effect automatically. Leave reload off in containers and production.
+- In Docker, start this server with `docker run -p 8000:8000 <image> web --host 0.0.0.0 --port 8000`; the image `EXPOSE`s `8000`. Connection details (LM Studio/Ollama endpoint, key, model) are entered in the browser UI, not passed to `ultravision-web`.

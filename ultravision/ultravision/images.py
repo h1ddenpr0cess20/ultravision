@@ -1,10 +1,12 @@
 """Utilities for reading, transforming, and describing image assets."""
 
 import base64
+import fnmatch
 import hashlib
 import mimetypes
+from io import BytesIO
 from pathlib import Path
-from typing import List, Optional, Dict, Any, Union
+from typing import List, Optional, Dict, Any, Tuple, Union
 
 try:
     from PIL import Image, ImageOps
@@ -13,6 +15,8 @@ except Exception:
     _PIL_OK = False
 
 PathLike = Union[str, Path]
+
+DEFAULT_IMAGE_PATTERNS = ["*.png", "*.jpg", "*.jpeg", "*.webp", "*.gif", "*.bmp", "*.tiff"]
 
 
 def guess_mime(path: PathLike) -> str:
@@ -52,15 +56,19 @@ def load_image_bytes(path: Path) -> bytes:
     with open(path, "rb") as f:
         return f.read()
 
-def autorotate_and_resize(path: Path, max_side: Optional[int]) -> Optional[bytes]:
+def autorotate_and_resize(path: Path, max_side: Optional[int]) -> Optional[Tuple[bytes, str]]:
     """Attempt to rotate the image via EXIF and shrink it to ``max_side``.
+
+    JPEG and WebP sources are re-encoded in their original format; anything else
+    is re-encoded as PNG, so the returned MIME type may differ from the source's.
 
     Args:
         path (Path): Original image path for EXIF and MIME guessing.
         max_side (Optional[int]): Maximum width/height in pixels; ignored if ``None``.
 
     Returns:
-        Optional[bytes]: Resized image contents, or ``None`` if Pillow is unavailable or fails.
+        Optional[Tuple[bytes, str]]: Re-encoded image contents and their MIME type,
+            or ``None`` if Pillow is unavailable or processing fails.
     """
     if not _PIL_OK:
         return None
@@ -69,18 +77,18 @@ def autorotate_and_resize(path: Path, max_side: Optional[int]) -> Optional[bytes
         img = ImageOps.exif_transpose(img)
         if max_side and max(img.size) > max_side:
             ratio = max_side / float(max(img.size))
-            new_size = (int(img.size[0] * ratio), int(img.size[1] * ratio))
+            new_size = (max(1, int(img.size[0] * ratio)), max(1, int(img.size[1] * ratio)))
             img = img.resize(new_size, Image.LANCZOS)
         mime = guess_mime(path)
-        fmt = "PNG"
         if mime in ("image/jpeg", "image/jpg"):
-            fmt = "JPEG"
+            fmt, out_mime = "JPEG", "image/jpeg"
         elif mime == "image/webp":
-            fmt = "WEBP"
-        from io import BytesIO
+            fmt, out_mime = "WEBP", "image/webp"
+        else:
+            fmt, out_mime = "PNG", "image/png"
         buf = BytesIO()
         img.save(buf, format=fmt)
-        return buf.getvalue()
+        return buf.getvalue(), out_mime
     except Exception:
         return None
 
@@ -97,12 +105,14 @@ def to_data_url(mime: str, data: bytes) -> str:
     b64 = base64.b64encode(data).decode("ascii")
     return f"data:{mime};base64,{b64}"
 
-def file_meta(path: PathLike, data: bytes) -> Dict[str, Any]:
+def file_meta(path: PathLike, data: bytes, mime: Optional[str] = None) -> Dict[str, Any]:
     """Compose metadata for a given image payload.
 
     Args:
         path (PathLike): Original file path or name.
         data (bytes): Raw image bytes.
+        mime (Optional[str]): MIME type of ``data`` when already known (e.g. after
+            re-encoding); guessed from ``path`` otherwise.
 
     Returns:
         Dict[str, Any]: Metadata including size, MIME, SHA-256, and optional dimensions.
@@ -110,12 +120,11 @@ def file_meta(path: PathLike, data: bytes) -> Dict[str, Any]:
     meta: Dict[str, Any] = {
         "file": str(path),
         "size_bytes": len(data),
-        "mime": guess_mime(path),
+        "mime": mime or guess_mime(path),
         "sha256": sha256_bytes(data),
     }
     if _PIL_OK:
         try:
-            from io import BytesIO
             im = Image.open(BytesIO(data))
             meta["width"], meta["height"] = im.size
             meta["mode"] = im.mode
@@ -126,6 +135,10 @@ def file_meta(path: PathLike, data: bytes) -> Dict[str, Any]:
 def find_images(root: Path, recursive: bool, patterns: Optional[List[str]]) -> List[Path]:
     """Discover image files under a root directory using glob patterns.
 
+    Matching is case-insensitive, so files with uppercase extensions
+    (e.g. camera-produced ``IMG_0001.JPG``) are found on case-sensitive
+    filesystems too.
+
     Args:
         root (Path): Directory to scan.
         recursive (bool): Whether to walk subdirectories.
@@ -134,15 +147,15 @@ def find_images(root: Path, recursive: bool, patterns: Optional[List[str]]) -> L
     Returns:
         List[Path]: Sorted, unique file paths to process.
     """
-    globs = patterns or ["*.png", "*.jpg", "*.jpeg", "*.webp", "*.gif", "*.bmp", "*.tiff"]
-    paths = []
-    if recursive:
-        for pat in globs:
-            paths.extend(root.rglob(pat))
-    else:
-        for pat in globs:
-            paths.extend(root.glob(pat))
-    uniq = sorted({p.resolve() for p in paths if p.is_file()})
+    globs = [pat.lower() for pat in (patterns or DEFAULT_IMAGE_PATTERNS)]
+    candidates = root.rglob("*") if recursive else root.glob("*")
+    uniq = sorted(
+        {
+            p.resolve()
+            for p in candidates
+            if p.is_file() and any(fnmatch.fnmatch(p.name.lower(), pat) for pat in globs)
+        }
+    )
     return uniq
 
 def make_messages(system_prompt: str, user_prompt: str, image_data_urls: List[str]):

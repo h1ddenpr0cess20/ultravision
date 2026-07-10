@@ -7,7 +7,7 @@ The CLI (`ultravision`) is the most direct way to process large image sets with 
 Install the package and invoke the CLI from the directory containing your images:
 
 ```bash
-pip install .
+pip install ./ultravision
 ultravision ./images --model qwen/qwen3-vl-8b --format jsonl --out results.jsonl
 ```
 
@@ -29,7 +29,7 @@ Every run:
 | `--auto-discover` | Scan for LM Studio/Ollama hosts and auto-select the first vision-ready model. |
 | `--prefer-service` | When auto-discovering, prefer `lm_studio` (default) or `ollama`. |
 | `--lm-studio-port` / `--ollama-port` | Ports probed during auto-discovery (defaults 1234 / 11434). |
-| `--discovery-timeout` / `--discovery-models` | Tune the HTTP timeout and add extra model substrings to treat as “vision”. |
+| `--discovery-timeout` / `--discovery-models` | Tune the HTTP timeout; `--discovery-models` force-includes models whose id contains a given substring, on top of automatic capability detection. |
 | `--prompt` / `--system-prompt` | Customize the user/system messages sent before images. |
 | `--per-request` | Number of images per inference call; helps balance latency and JSON payload size. |
 | `--recursive` / `--patterns` | Traverse subdirectories and match custom glob patterns. |
@@ -45,7 +45,7 @@ Every run:
 
 ### Auto-discovery
 
-Pass `--auto-discover` when you don’t want to type `--api-base`/`--model`. UltraVision will instantiate the bundled `VisionModelDiscovery`, scan localhost plus LAN ranges for LM Studio/Ollama servers, and pick the first vision-capable model. Use `--prefer-service ollama` if you’d like Ollama options ranked first, override the probe ports with `--lm-studio-port` / `--ollama-port`, and add extra model substrings (e.g., `gemma3`) via `--discovery-models`. If no servers are reachable the CLI exits early so you can provide manual values instead.
+Pass `--auto-discover` when you don’t want to type `--api-base`/`--model`. UltraVision will instantiate the bundled `VisionModelDiscovery`, scan localhost plus LAN ranges for LM Studio/Ollama servers, and pick the first vision-capable model. Vision capability comes from each provider's own metadata (LM Studio's `/api/v0/models` `type == "vlm"` and Ollama's `/api/show` `capabilities`), so any vision model is detected regardless of name. Use `--prefer-service ollama` if you’d like Ollama options ranked first, override the probe ports with `--lm-studio-port` / `--ollama-port`, and force-include a model by id substring via `--discovery-models` if a server doesn't advertise its capabilities. If no servers are reachable the CLI exits early so you can provide manual values instead.
 
 ### Running directly against Ollama
 
@@ -73,7 +73,10 @@ All writers rely on `api.extract_text` to pull the assistant message out of LM S
 ### Logging and failures
 
 - `rich` is optional; if available, it powers spinner/status updates and colored logging via the `info`, `warn`, and `err` helpers.
-- Failed batches (after exhausting retries) are logged to `failures.log` (or the provided `--fail-log`) in JSONL format for replay.
+- Retries are selective: transient failures (connection drops, timeouts, HTTP 408/409/425/429, and 5xx) are retried with exponential backoff up to `--retries`, while deterministic client errors (most 4xx — bad model id, malformed request, auth) fail fast so you don't waste the backoff budget on a request that can never succeed.
+- Failed batches (after exhausting retries, or immediately for non-retryable errors) are logged to `failures.log` (or the provided `--fail-log`) in JSONL format for replay.
+
+Run `ultravision --version` to print the installed package version.
 
 ## Tips for reproducibility
 

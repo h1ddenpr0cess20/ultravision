@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-set -euo pipefail
+set -eu
 
 if [ "$#" -gt 0 ] && [ "$1" = "web" ]; then
   shift
